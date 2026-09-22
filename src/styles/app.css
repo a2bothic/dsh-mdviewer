@@ -235,9 +235,9 @@ body.outline-hidden #toc-splitter { display: none; }
 
 /* --------------------------------- TOC ---------------------------------- */
 .toc {
-  /* Must be allowed to shrink within its pane. Without a flex basis the list
-     keeps its full content height and can overflow the pane — and since the
-     list is what receives pointer events, it then covers the document list. */
+  /* Hardening, not load-bearing: with the pane bounded this already fits.
+     Stating the shrink explicitly means a future flex-basis or height on this
+     selector cannot silently overflow the pane and cover the list below. */
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 0 8px 10px 10px;
@@ -264,7 +264,7 @@ body.outline-hidden #toc-splitter { display: none; }
 
 /* --------------------------------- Tree --------------------------------- */
 .tree {
-  /* Same reason as .toc: the list must shrink to its pane, not overflow it. */
+  /* Same hardening as .toc. */
   flex: 1 1 auto;
   overflow-y: auto;
   padding: 0 8px 16px 10px;

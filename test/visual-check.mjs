@@ -282,6 +282,12 @@ const overflow = await page.evaluate(() => {
 check('outline list stays inside its pane',
   Math.round(overflow.tocList.bottom) <= Math.round(overflow.tocPane.bottom) + 1,
   `list ends ${Math.round(overflow.tocList.bottom - overflow.tocPane.bottom)}px past the pane`);
+// A stale `#toc { flex: 0 0 260px }` from the standalone reader pinned the list
+// to a fixed height, so a tall pane showed only 260px of outline and left the
+// rest empty — the same wasted-space symptom, just inside the pane.
+check('outline list fills its pane instead of a fixed height',
+  Math.round(overflow.tocPane.height - overflow.tocList.height) < 40,
+  `pane ${Math.round(overflow.tocPane.height)}px, list ${Math.round(overflow.tocList.height)}px`);
 check('document list stays inside its pane',
   Math.round(overflow.treeList.bottom) <= Math.round(overflow.treePane.bottom) + 1,
   `list ends ${Math.round(overflow.treeList.bottom - overflow.treePane.bottom)}px past the pane`);
