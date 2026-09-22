@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+src-tauri/gen/
+
+# Test artifacts
+test-output/
+.pw-browsers/
+.chrome-profile/
+
+# Package-manager caches
+.pnpmcache/
+.pnpm-store/
+.npmcache/
+
+# Logs and local files
+*.log
+.DS_Store
+verify-zh.mjs

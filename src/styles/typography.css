@@ -1,0 +1,450 @@
+/* ==========================================================================
+   Markdown Reader — typography system derived from the DeepSeek Harness
+   web frontend's markdown tokens and rhythm rules.
+   ========================================================================== */
+
+/* Font stacks and the rhythm tokens live in tokens.css; this file only applies
+   them. Defining :root values here as well would silently shadow that file,
+   because this stylesheet is imported after it. */
+
+/* ------------------------------- Themes --------------------------------- */
+:root {
+  --bg: #ffffff;
+  --surface: #f7f8fa;
+  --surface-2: #eef0f4;
+  --label-primary: #1a1a1e;
+  --label-secondary: #5c5f66;
+  --label-caption: #8a8f99;
+  --border: #e3e6ec;
+  --border-l2: #d8dce4;
+  --link: #2f6feb;
+  --inline-code-bg: #f2f3f7;
+  --code-block-bg: #fafbfc;
+  --quote-bar: #c3c8d2;
+  --selection: #cfe0ff;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+}
+
+.theme-dark {
+  --bg: #16181d;
+  --surface: #1c1f26;
+  --surface-2: #23272f;
+  --label-primary: #e8eaed;
+  --label-secondary: #a9aeb8;
+  --label-caption: #7c828d;
+  --border: #2a2e37;
+  --border-l2: #333844;
+  --link: #6ea8ff;
+  --inline-code-bg: #23272f;
+  --code-block-bg: #1b1e24;
+  --quote-bar: #4a505c;
+  --selection: #2b4a7d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 1px 3px rgba(0, 0, 0, .4);
+}
+
+/* ------------------------------- Shell ---------------------------------- */
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0; height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--label-primary);
+  font-family: var(--font-sans);
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+::selection { background: var(--selection); }
+
+/* ------------------------------- Toolbar -------------------------------- */
+#bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  user-select: none;
+}
+
+#bar .spacer { flex: 1 1 auto; }
+
+#bar button {
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--label-secondary);
+  background: transparent;
+  border: 1px solid var(--border-l2);
+  border-radius: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: background-color .15s, color .15s, border-color .15s;
+}
+#bar button:hover { background: var(--surface-2); color: var(--label-primary); }
+#bar button:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--link); }
+
+#status {
+  font-size: 12px;
+  color: var(--label-caption);
+  margin-left: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 40vw;
+}
+
+/* ------------------------------- Layout --------------------------------- */
+#main {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+#toc {
+  flex: 0 0 260px;
+  overflow-y: auto;
+  padding: 24px 8px 48px 20px;
+  border-right: 1px solid var(--border);
+  background: var(--bg);
+  font-size: 13px;
+  line-height: 22px;
+}
+
+body.toc-hidden #toc { display: none; }
+
+#toc ul { list-style: none; margin: 0; padding: 0; }
+#toc li { margin: 0; }
+#toc a {
+  display: block;
+  padding: 3px 8px;
+  color: var(--label-secondary);
+  text-decoration: none;
+  border-radius: 5px;
+  border-left: 2px solid transparent;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: color .15s, background-color .15s;
+}
+#toc a:hover { color: var(--label-primary); background: var(--surface-2); }
+#toc a.active { color: var(--link); border-left-color: var(--link); font-weight: 500; }
+#toc .toc-l2 a { padding-left: 18px; }
+#toc .toc-l3 a { padding-left: 30px; }
+#toc .toc-l4 a { padding-left: 42px; }
+#toc .toc-empty { color: var(--label-caption); font-size: 12px; padding: 0 8px; }
+
+#scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  min-width: 0;
+  scroll-behavior: smooth;
+}
+
+/* ==========================================================================
+   The reading column — DSH rhythm applied
+   ========================================================================== */
+.markdown {
+  max-width: var(--measure);
+  margin: 0 auto;
+  padding: 40px 32px 120px;
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  color: var(--label-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Kill leading/trailing margins so the column starts flush (DSH does this). */
+.markdown > *:first-child { margin-top: 0 !important; }
+.markdown > *:last-child  { margin-bottom: 0 !important; }
+
+/* --- Paragraphs: gap is 2/3 of the line height, so blocks group --------- */
+.markdown p { margin: var(--gap-block) 0; }
+
+/* --- Headings: large space above, small below -> they own what follows -- */
+.markdown h1,
+.markdown h2,
+.markdown h3 {
+  margin: var(--gap-head) 0 var(--gap-head-after);
+  font-weight: 700;
+  letter-spacing: -0.011em;
+}
+.markdown h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); }
+.markdown h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); }
+.markdown h3 { font-size: var(--fs-h3); line-height: var(--lh-h3); }
+
+.markdown h4,
+.markdown h5,
+.markdown h6 {
+  margin: var(--gap-block) 0;
+  font-size: var(--fs-base);
+  line-height: var(--lh);
+  font-weight: 600;
+}
+
+/* A heading whose next sibling is a list tightens up (DSH rule). */
+.markdown :where(h4, h5, h6):has(+ :where(ul, ol)) { margin-bottom: 8px; }
+.markdown :where(h4, h5, h6) + :where(ul, ol) { margin-top: 8px; }
+
+.markdown h1 strong,
+.markdown h2 strong,
+.markdown h3 strong,
+.markdown h4 strong { font-weight: inherit; }
+
+/* --- Emphasis ---------------------------------------------------------- */
+.markdown strong { font-weight: 600; }
+.markdown em { font-style: italic; }
+.markdown del { color: var(--label-caption); }
+
+/* --- Links: no underline at rest, dotted on hover (quieter reading) ----- */
+.markdown a {
+  color: var(--link);
+  font-weight: 500;
+  text-decoration: none;
+  transition: box-shadow .15s;
+}
+.markdown a:hover,
+.markdown a:focus {
+  outline: none;
+  text-decoration: underline dotted var(--link);
+  text-underline-offset: 3px;
+}
+.markdown a:focus-visible { box-shadow: 0 0 0 2px var(--link); border-radius: 3px; }
+
+/* --- Lists: 18px indent, 6px item gap ---------------------------------- */
+.markdown :where(ul, ol) {
+  margin: var(--gap-block) 0;
+  padding-left: var(--list-indent);
+}
+.markdown li:not(:first-child) { margin-top: var(--list-item-gap); }
+.markdown li > :where(ul, ol) { margin-top: 4px; }
+.markdown li > p { margin: 8px 0; }
+.markdown li > *:first-child { margin-top: 0; }
+.markdown li > *:last-child:not(.code-block) { margin-bottom: 0; }
+.markdown li::marker { color: var(--label-secondary); line-height: var(--lh); }
+
+/* Nested ordered lists sit inside, matching DSH. */
+.markdown :where(ul, ol) ol { list-style-position: inside; padding-left: 0; }
+.markdown :where(ul, ol) ol li p { display: inline; }
+
+/* Task lists */
+.markdown input[type=checkbox] {
+  margin: 0 8px 0 0;
+  accent-color: var(--label-secondary);
+  vertical-align: -1px;
+}
+.markdown li:has(> input[type=checkbox]) { list-style: none; margin-left: -18px; }
+
+/* --- Horizontal rule: hairline, never a heavy divider ------------------ */
+.markdown hr {
+  display: block;
+  border: none;
+  height: .5px;
+  margin: var(--gap-head) 0;
+  background: var(--border-l2);
+}
+.markdown hr.doc-rule { height: 1px; margin: 64px 0 40px; }
+.markdown h1.doc-sep { margin-top: 0; }
+
+/* --- Blockquote: restrained 2px bar ------------------------------------ */
+.markdown blockquote {
+  border-left: 2px solid var(--quote-bar);
+  margin: var(--gap-block) 0 0;
+  padding-left: 14px;
+  color: var(--label-secondary);
+}
+.markdown blockquote > *:first-child { margin-top: 0; }
+.markdown blockquote > *:last-child { margin-bottom: 0; }
+
+/* --- Inline code: shrink to .875em so it matches body optical weight --- */
+.markdown :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: .875em;
+  background: var(--inline-code-bg);
+  border: .5px solid var(--border);
+  border-radius: 5px;
+  padding: 2px 5px;
+  overflow-wrap: anywhere;
+}
+.markdown :where(h1, h2, h3, h4) code {
+  font-size: .9em;
+  font-family: var(--font-mono);
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+
+/* --- Code blocks -------------------------------------------------------- */
+.markdown .code-block {
+  position: relative;
+  margin: var(--gap-block) 0;
+  background: var(--code-block-bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.markdown .code-block .code-lang {
+  position: absolute;
+  top: 8px; left: 12px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--label-caption);
+  font-family: var(--font-mono);
+  pointer-events: none;
+  z-index: 2;
+}
+.markdown .copy-btn {
+  position: absolute;
+  top: 6px; right: 8px;
+  z-index: 2;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 2px 8px;
+  color: var(--label-caption);
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s, color .15s;
+}
+.markdown .code-block:hover .copy-btn { opacity: 1; }
+.markdown .copy-btn:hover { color: var(--label-primary); }
+
+.markdown .code-block pre {
+  margin: 0;
+  padding: 14px 16px;
+  overflow-x: auto;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 22px;
+}
+.markdown .code-block pre code {
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+/* Give room for the language label above the first code line. */
+.markdown .code-block:has(.code-lang) pre { padding-top: 28px; }
+
+/* Shiki dual themes */
+.theme-dark .shiki,
+.theme-dark .shiki span {
+  color: var(--shiki-dark) !important;
+  background-color: transparent !important;
+}
+
+/* --- Tables ------------------------------------------------------------- */
+.markdown table {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  margin: var(--gap-block) 0;
+  font-size: .9375em;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border-l2);
+  padding: 7px 12px;
+  text-align: left;
+  vertical-align: top;
+}
+.markdown th {
+  background: var(--surface-2);
+  font-weight: 600;
+}
+.markdown tr:nth-child(even) td { background: var(--surface); }
+
+/* --- Images ------------------------------------------------------------- */
+.markdown img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: var(--gap-block) 0;
+}
+
+/* --- Math --------------------------------------------------------------- */
+.markdown .katex-display {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  margin: var(--gap-block) 0;
+  padding: 2px 0;
+}
+.markdown .katex { font-size: 1.05em; }
+
+/* ------------------------------- Welcome -------------------------------- */
+#welcome {
+  max-width: 34rem;
+  margin: 0 auto;
+  padding: 96px 32px;
+  text-align: center;
+  color: var(--label-secondary);
+}
+#welcome h1 {
+  font-size: calc(21px + var(--step));
+  line-height: var(--lh-h1);
+  color: var(--label-primary);
+  margin: 0 0 12px;
+  font-weight: 700;
+  letter-spacing: -0.011em;
+}
+#welcome p { margin: 0 0 24px; font-size: 14px; line-height: 22px; }
+#welcome kbd {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-l2);
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+
+/* ------------------------------- Drag state ----------------------------- */
+body.dragging::after {
+  content: "Drop .md files to read";
+  position: fixed;
+  inset: 12px;
+  border: 2px dashed var(--link);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--link) 8%, transparent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--link);
+  z-index: 999;
+  pointer-events: none;
+}
+
+/* ------------------------------- Print ---------------------------------- */
+@media print {
+  #bar, #toc { display: none !important; }
+  #scroll { overflow: visible; }
+  body { overflow: visible; }
+  .markdown { max-width: none; padding: 0; }
+  .markdown a { color: inherit; text-decoration: underline; }
+}
+
+/* ------------------------------- Narrow screens ------------------------- */
+@media (max-width: 900px) {
+  #toc { position: fixed; inset: 45px 0 0 0; z-index: 50; width: 280px; box-shadow: var(--shadow); }
+  .markdown { padding: 24px 20px 96px; }
+}

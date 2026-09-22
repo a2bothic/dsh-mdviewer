@@ -1,0 +1,3 @@
+Plain text files are supported too.
+
+This one has the word rhythm in it.

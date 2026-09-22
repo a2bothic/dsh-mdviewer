@@ -1,0 +1,80 @@
+/* ==========================================================================
+   Markdown Reader — typography system derived from the DeepSeek Harness
+   web frontend's markdown tokens and rhythm rules.
+   ========================================================================== */
+
+:root {
+  /* --- Font stacks (same CJK ordering as DSH) --------------------------
+   * CJK families come before the generic keyword so Chinese and English stay
+   * on a consistent baseline. Windows and macOS fonts lead; the Noto and
+   * WenQuanYi entries cover Linux, where the system has no CJK font by
+   * default and Chinese would otherwise render as tofu boxes. */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+               "Source Han Sans SC", "WenQuanYi Micro Hei", "Helvetica Neue",
+               Helvetica, Arial, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", "Fira Code", Consolas,
+               "Liberation Mono", Menlo, Courier, "PingFang SC",
+               "Microsoft YaHei", "Noto Sans Mono CJK SC", monospace;
+
+  /* --- Reader controls (JS overrides these) ---------------------------- */
+  --base-size: 16px;
+  --measure: 42rem;
+
+  /* --- Vertical rhythm (DSH: fixed px, never em/%, so zoom keeps beat) -- */
+  --lh-base: 24px;
+  --gap-block: 16px;   /* paragraph / list / code spacing */
+  --gap-head: 32px;    /* heading space above */
+  --gap-head-after: 16px;
+  --list-indent: 18px; /* DSH uses 18px, far tighter than the UA default */
+  --list-item-gap: 6px;
+
+  /* --- Derived from --base-size so the L/XL buttons scale the rhythm --- */
+  --fs-base: var(--base-size);
+  --lh: calc(var(--lh-base) + (var(--base-size) - 16px));
+  --step: calc(var(--base-size) - 16px);
+
+  --fs-h1: calc(21px + var(--step));
+  --lh-h1: calc(30px + var(--step));
+  --fs-h2: calc(19px + var(--step));
+  --lh-h2: calc(28px + var(--step));
+  --fs-h3: calc(18px + var(--step));
+  --lh-h3: calc(26px + var(--step));
+  --fs-h4: var(--fs-base);
+}
+
+/* ------------------------------- Themes --------------------------------- */
+:root {
+  --bg: #ffffff;
+  --surface: #f7f8fa;
+  --surface-2: #eef0f4;
+  --label-primary: #1a1a1e;
+  --label-secondary: #5c5f66;
+  --label-caption: #8a8f99;
+  --border: #e3e6ec;
+  --border-l2: #d8dce4;
+  --link: #2f6feb;
+  --inline-code-bg: #f2f3f7;
+  --code-block-bg: #fafbfc;
+  --quote-bar: #c3c8d2;
+  --selection: #cfe0ff;
+  --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .1);
+}
+
+.theme-dark {
+  --bg: #16181d;
+  --surface: #1c1f26;
+  --surface-2: #23272f;
+  --label-primary: #e8eaed;
+  --label-secondary: #a9aeb8;
+  --label-caption: #7c828d;
+  --border: #2a2e37;
+  --border-l2: #333844;
+  --link: #6ea8ff;
+  --inline-code-bg: #23272f;
+  --code-block-bg: #1b1e24;
+  --quote-bar: #4a505c;
+  --selection: #2b4a7d;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 1px 3px rgba(0, 0, 0, .4);
+}
+

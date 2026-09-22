@@ -1,0 +1,44 @@
+{
+  "name": "dsh-mdviewer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Lightweight Markdown document viewer \u2014 folder browsing and full-text search, built on Tauri v2.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "dev:desktop": "tauri dev",
+    "build:desktop": "tauri build",
+    "typecheck": "tsc --noEmit",
+    "check": "bash scripts/check.sh",
+    "test": "node test/visual-check.mjs",
+    "test:rust": "cd src-tauri && cargo test"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.9.0",
+    "@tauri-apps/plugin-dialog": "^2.4.0",
+    "@tauri-apps/plugin-opener": "^2.5.0",
+    "dompurify": "^3.2.7",
+    "katex": "^0.16.25",
+    "marked": "^16.4.1",
+    "shiki": "^3.13.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.9.0",
+    "@types/dompurify": "^3.0.5",
+    "playwright": "^1.63.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/a2bothic/dsh-mdviewer.git"
+  },
+  "homepage": "https://github.com/a2bothic/dsh-mdviewer#readme",
+  "bugs": {
+    "url": "https://github.com/a2bothic/dsh-mdviewer/issues"
+  }
+}
