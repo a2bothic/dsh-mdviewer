@@ -105,11 +105,11 @@ await page.evaluate(() => {
 await page.waitForTimeout(900);
 await shot('screenshot-math.png');
 
-// 5. Documents section collapsed, leaving only the outline.
-await page.click('#side-title-btn');
+// 5. Document list hidden, leaving only the outline.
+await page.click('#toggle-docs');
 await page.waitForTimeout(600);
 await shot('screenshot-sections.png');
-await page.click('#side-title-btn');
+await page.click('#toggle-docs');
 await page.waitForTimeout(400);
 
 // 6. Sidebar collapsed, column re-centred.

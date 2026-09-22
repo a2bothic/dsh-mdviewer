@@ -30,6 +30,8 @@ $('#app').innerHTML = `
 <div id="bar">
   <button id="open-folder" class="btn" title="Choose a folder">Open folder…</button>
   <button id="toggle-side" class="btn" title="Show or hide the sidebar (Ctrl+B)">Sidebar</button>
+  <button id="toggle-docs" class="btn" title="Show or hide the document list (Ctrl+D)">Documents</button>
+  <button id="toggle-outline" class="btn" title="Show or hide the outline (Ctrl+O)">Outline</button>
   <div id="crumb" class="crumb">No folder opened</div>
   <span class="spacer"></span>
   <input id="filter" class="filter" type="search" placeholder="Search all files…" spellcheck="false">
@@ -258,7 +260,7 @@ function setSidebarOpen(open: boolean, persist = true): void {
   }
   // The splitter clamps against the sidebar height, which is zero while hidden.
   if (open && tocWrap.style.height) {
-    requestAnimationFrame(() => setTocHeight(parseFloat(tocWrap.style.height), false));
+    requestAnimationFrame(clampSplit);
   }
 }
 
@@ -266,9 +268,17 @@ $('#toggle-side').addEventListener('click', () => setSidebarOpen(!state.sideOpen
 
 // Ctrl/Cmd+B is the conventional shortcut for this panel.
 window.addEventListener('keydown', (e: KeyboardEvent) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  const k = e.key.toLowerCase();
+  if (k === 'b') {
     e.preventDefault();
     setSidebarOpen(!state.sideOpen);
+  } else if (k === 'd') {
+    e.preventDefault();
+    setDocsVisible(!state.docsOpen);
+  } else if (k === 'o') {
+    e.preventDefault();
+    setOutlineVisible(!state.outlineOpen);
   }
 });
 
@@ -280,70 +290,77 @@ const treeWrap = $('#tree-wrap');
 const tocTitle = $('#toc-title');
 const treeTitle = $('#side-title-btn');
 const side = $('#side');
-const tocMinPx = 60;
 
 /* -------------------- Collapsible sidebar sections ---------------------- */
 // Each section header toggles its own panel, so collapsing Documents leaves
 // the outline visible (and vice versa). Hiding both is the sidebar button's
 // job; these are per-section.
-function setSectionOpen(
-  key: 'outline' | 'documents',
-  open: boolean,
-  persist = true,
-): void {
-  const isOutline = key === 'outline';
-  const panel = isOutline ? tocWrap : treeWrap;
-  const button = isOutline ? tocTitle : treeTitle;
-  const content = isOutline ? $('#toc') : $('#tree');
-
-  panel.classList.toggle('collapsed', !open);
-  content.hidden = !open;
-  button.setAttribute('aria-expanded', String(open));
-  button.title = open ? 'Collapse' : 'Expand';
-  // The divider is meaningless while the outline is collapsed.
-  if (isOutline) splitter.hidden = !open;
-
-  if (isOutline) state.outlineOpen = open; else state.docsOpen = open;
-
+// Hiding the document list is the same kind of action as the Sidebar button:
+// the whole pane leaves and the outline takes the full column. It is not a
+// content collapse — the header goes too.
+function setDocsVisible(visible: boolean, persist = true): void {
+  state.docsOpen = visible;
+  document.body.classList.toggle('docs-hidden', !visible);
+  treeTitle.setAttribute('aria-expanded', String(visible));
+  treeTitle.title = visible ? 'Hide the document list' : 'Show the document list';
+  const btn = $('#toggle-docs');
+  btn.classList.toggle('active', !visible);
+  btn.setAttribute('aria-pressed', String(!visible));
   if (persist) {
-    try {
-      localStorage.setItem(`mdviewer.${key}Open`, open ? '1' : '0');
-    } catch { /* ignore */ }
+    try { localStorage.setItem('mdviewer.docsOpen', visible ? '1' : '0'); } catch { /* ignore */ }
   }
-  // Re-clamp the outline cap now that the available height has changed.
-  if (open && tocWrap.style.height) {
-    requestAnimationFrame(
-      () => setTocHeight(parseFloat(tocWrap.style.height), false, true));
-  }
+  // With the list hidden the outline fills the column, so the inline share
+  // (which would win over the stylesheet) has to be cleared; showing it again
+  // re-applies the remembered split.
+  if (visible) clampSplit();
+  else tocWrap.style.height = '';
 }
 
-tocTitle.addEventListener('click', () => setSectionOpen('outline', !state.outlineOpen));
-treeTitle.addEventListener('click', () => setSectionOpen('documents', !state.docsOpen));
+function setOutlineVisible(visible: boolean, persist = true): void {
+  state.outlineOpen = visible;
+  document.body.classList.toggle('outline-hidden', !visible);
+  tocTitle.setAttribute('aria-expanded', String(visible));
+  tocTitle.title = visible ? 'Hide the outline' : 'Show the outline';
+  const btn = $('#toggle-outline');
+  btn.classList.toggle('active', !visible);
+  btn.setAttribute('aria-pressed', String(!visible));
+  if (persist) {
+    try { localStorage.setItem('mdviewer.outlineOpen', visible ? '1' : '0'); } catch { /* ignore */ }
+  }
+  if (visible) clampSplit();
+}
+
+tocTitle.addEventListener('click', () => setOutlineVisible(!state.outlineOpen));
+treeTitle.addEventListener('click', () => setDocsVisible(!state.docsOpen));
+// The header disappears with its pane, so the toolbar button is what brings
+// the list back.
+$('#toggle-docs').addEventListener('click', () => setDocsVisible(!state.docsOpen));
+$('#toggle-outline').addEventListener('click', () => setOutlineVisible(!state.outlineOpen));
 
 /* --------------------- Outline / Documents splitter --------------------- */
-// The divider controls how much of a long outline is visible.
-//
-// While nobody has dragged it, the panel simply hugs its content (CSS
-// max-height + fit-content), so a short outline leaves no blank block above
-// the divider. Dragging is an explicit request for a specific size, so from
-// the first drag onward the panel is pinned to an explicit height instead —
-// that is the only way "hug the content" and "grow when asked" can coexist.
-function setTocHeight(px: number, persist = true, pin = false): void {
-  const max = Math.max(tocMinPx, side.clientHeight - tocMinPx);
-  const h = Math.round(Math.min(Math.max(px, tocMinPx), max));
-  tocWrap.style.maxHeight = `${h}px`;
-  if (pin) tocWrap.style.height = `${h}px`;
-  splitter.setAttribute('aria-valuenow', String(h));
+// The sidebar is one fixed-height column and the divider simply moves the
+// boundary between its two panes, so together they always fill it exactly.
+// Sizes are independent of content; a short list scrolls inside its share.
+const OUTLINE_MIN = 80;   // keep both headers usable
+const OUTLINE_DEFAULT = 45; // percent
+
+function setOutlineShare(percent: number, persist = true): void {
+  if (!state.docsOpen) return;
+  const total = side.clientHeight;
+  const minPct = (OUTLINE_MIN / total) * 100;
+  const pct = Math.min(Math.max(percent, minPct), 100 - minPct);
+  tocWrap.style.height = `${pct}%`;
+  splitter.setAttribute('aria-valuenow', String(Math.round(pct)));
   if (persist) {
-    try { localStorage.setItem('mdviewer.tocHeight', String(h)); } catch { /* ignore */ }
+    try { localStorage.setItem('mdviewer.outlineShare', String(pct)); } catch { /* ignore */ }
   }
 }
 
-/** Let the panel hug its content again. */
-function unpinTocHeight(): void {
-  tocWrap.style.height = '';
-  tocWrap.style.maxHeight = '';
-  try { localStorage.removeItem('mdviewer.tocHeight'); } catch { /* ignore */ }
+/** Keep the current share valid after a resize or a pane reappearing. */
+function clampSplit(): void {
+  if (!state.docsOpen) return;
+  const raw = parseFloat(localStorage.getItem('mdviewer.outlineShare') ?? '');
+  setOutlineShare(Number.isFinite(raw) && raw > 0 ? raw : OUTLINE_DEFAULT, false);
 }
 
 let dragging = false;
@@ -357,9 +374,10 @@ splitter.addEventListener('pointerdown', (e: PointerEvent) => {
 
 splitter.addEventListener('pointermove', (e: PointerEvent) => {
   if (!dragging) return;
-  // Measured from the top of the sidebar to the pointer. The title bar sits
-  // inside the panel, so the drag height is the pointer offset directly.
-  setTocHeight(e.clientY - side.getBoundingClientRect().top, true, true);
+  const box = side.getBoundingClientRect();
+  // The divider position as a share of the column is exactly what the pane
+  // above it should occupy.
+  setOutlineShare(((e.clientY - box.top) / box.height) * 100);
 });
 
 function endDrag(e: PointerEvent): void {
@@ -371,29 +389,21 @@ function endDrag(e: PointerEvent): void {
 splitter.addEventListener('pointerup', endDrag);
 splitter.addEventListener('pointercancel', endDrag);
 
-// Keyboard access: arrows nudge, Home/End jump to the extremes. Any keyboard
-// adjustment also pins the height, for the same reason a drag does.
+// Keyboard access: arrows nudge, Home/End jump to the extremes.
 splitter.addEventListener('keydown', (e: KeyboardEvent) => {
-  const cur = tocWrap.getBoundingClientRect().height;
-  const step = e.shiftKey ? 40 : 10;
-  if (e.key === 'ArrowUp') { setTocHeight(cur - step, true, true); e.preventDefault(); }
-  else if (e.key === 'ArrowDown') { setTocHeight(cur + step, true, true); e.preventDefault(); }
-  else if (e.key === 'Home') { setTocHeight(tocMinPx, true, true); e.preventDefault(); }
-  else if (e.key === 'End') { setTocHeight(side.clientHeight, true, true); e.preventDefault(); }
+  const cur = parseFloat(tocWrap.style.height) || OUTLINE_DEFAULT;
+  const step = e.shiftKey ? 10 : 2;
+  if (e.key === 'ArrowUp') { setOutlineShare(cur - step); e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { setOutlineShare(cur + step); e.preventDefault(); }
+  else if (e.key === 'Home') { setOutlineShare(0); e.preventDefault(); }
+  else if (e.key === 'End') { setOutlineShare(100); e.preventDefault(); }
 });
 
-// Double-click resets to hugging the content.
-splitter.addEventListener('dblclick', () => {
-  unpinTocHeight();
-  splitter.setAttribute('aria-valuenow', String(Math.round(tocWrap.getBoundingClientRect().height)));
-});
+// Double-click restores the default split.
+splitter.addEventListener('dblclick', () => setOutlineShare(OUTLINE_DEFAULT));
 
-// Keep a pinned pixel height valid when the window is resized.
-window.addEventListener('resize', () => {
-  if (tocWrap.style.height) {
-    setTocHeight(parseFloat(tocWrap.style.height), false, true);
-  }
-});
+// Re-clamp on resize so neither pane can be squeezed out.
+window.addEventListener('resize', clampSplit);
 
 const WIDTHS: Array<[string, string]> = [
   ['Narrow', '34rem'], ['Comfort', '42rem'], ['Wide', '52rem'], ['Full', '100%'],
@@ -448,17 +458,12 @@ try {
 
 // Same for the two sidebar sections.
 try {
-  setSectionOpen('outline', localStorage.getItem('mdviewer.outlineOpen') !== '0', false);
-  setSectionOpen('documents', localStorage.getItem('mdviewer.documentsOpen') !== '0', false);
+  setOutlineVisible(localStorage.getItem('mdviewer.outlineOpen') !== '0', false);
+  setDocsVisible(localStorage.getItem('mdviewer.docsOpen') !== '0', false);
 } catch { /* ignore */ }
 
-// Restore the saved splitter position once the sidebar has a measured height.
-try {
-  const savedToc = parseFloat(localStorage.getItem('mdviewer.tocHeight') ?? '');
-  if (Number.isFinite(savedToc) && savedToc > 0) {
-    requestAnimationFrame(() => setTocHeight(savedToc, false, true));
-  }
-} catch { /* ignore */ }
+// Restore the saved split once the sidebar has a measured height.
+requestAnimationFrame(clampSplit);
 
 renderTree([]);
 renderToc();

@@ -123,31 +123,31 @@ body.side-collapsed #side { display: none; }
   position: relative;
 }
 
+/* ---------------------------------------------------------------------------
+   The sidebar is one fixed-height column divided into two panes by the
+   splitter. Each pane is a share of the full height, so the pair always fills
+   the column exactly — no gaps, and dragging the divider simply moves the
+   boundary between them. Pane sizes do not depend on how much content they
+   hold; a short outline scrolls within its own share.
+   --------------------------------------------------------------------------- */
 #toc-wrap {
-  /* Two requirements pull against each other:
-   *   a short outline must hug its content, leaving no blank block above the
-   *   divider, while a long one must be able to grow to the cap the splitter
-   *   sets so dragging it reveals more of the list.
-   * `flex-grow` on its own fails the first (the flex container hands over the
-   * free space regardless of content), so the panel is sized from its content
-   * and only *permitted* to reach the cap; the inner list scrolls past it. */
-  flex: 0 1 auto;
-  max-height: var(--toc-h, 38%);
-  height: fit-content;
+  flex: 0 0 auto;
+  height: 45%; /* replaced by an inline share once the user drags */
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
 
-/* Draggable divider between Contents and Documents. */
+/* Draggable divider between the outline and the document list. */
 #toc-splitter {
   flex: 0 0 auto;
   height: 6px;
-  margin: -3px 0;
   cursor: row-resize;
   position: relative;
   z-index: 3;
   touch-action: none;
+  background: var(--bg);
 }
 #toc-splitter::after {
   content: '';
@@ -177,7 +177,19 @@ body.side-collapsed #side { display: none; }
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow: hidden;
 }
+
+/* Hiding the document list is the same kind of action as the Sidebar button:
+   the whole pane goes away and the outline takes the full column. */
+body.docs-hidden #tree-wrap,
+body.docs-hidden #toc-splitter { display: none; }
+body.docs-hidden #toc-wrap { height: 100%; }
+
+/* The outline header stays put when the pane itself is hidden by the Sidebar
+   button, so the reading column can use the full width. */
+body.outline-hidden #toc-wrap { display: none; }
+body.outline-hidden #toc-splitter { display: none; }
 
 /* Section headers double as collapse toggles, so they are buttons that keep
    the original label styling. */
@@ -221,15 +233,12 @@ body.side-collapsed #side { display: none; }
 }
 .side-title[aria-expanded="false"] .chev { transform: rotate(0deg); }
 
-/* A collapsed section shows only its header. */
-#toc-wrap.collapsed,
-#tree-wrap.collapsed { flex: 0 0 auto; }
-#toc-wrap.collapsed { max-height: none !important; }
-#toc-wrap.collapsed .side-title,
-#tree-wrap.collapsed .side-title { padding-bottom: 8px; }
-
 /* --------------------------------- TOC ---------------------------------- */
 .toc {
+  /* Must be allowed to shrink within its pane. Without a flex basis the list
+     keeps its full content height and can overflow the pane — and since the
+     list is what receives pointer events, it then covers the document list. */
+  flex: 1 1 auto;
   overflow-y: auto;
   padding: 0 8px 10px 10px;
   font-size: 13px;
@@ -255,6 +264,8 @@ body.side-collapsed #side { display: none; }
 
 /* --------------------------------- Tree --------------------------------- */
 .tree {
+  /* Same reason as .toc: the list must shrink to its pane, not overflow it. */
+  flex: 1 1 auto;
   overflow-y: auto;
   padding: 0 8px 16px 10px;
   min-height: 0;
@@ -405,7 +416,14 @@ body.side-collapsed #side { display: none; }
 .toc::-webkit-scrollbar-track,
 #scroll::-webkit-scrollbar-track { background: transparent; }
 
-/* ------------------------------- Narrow --------------------------------- */
+/* ------------------------------- Print ---------------------------------- */
+@media print {
+  #bar, #side { display: none !important; }
+  #scroll { overflow: visible; }
+  body { overflow: visible; }
+}
+
+/* ------------------------------- Narrow screens ------------------------- */
 @media (max-width: 900px) {
   #side { flex-basis: 240px; }
   .filter { width: 140px; }

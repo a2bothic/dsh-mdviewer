@@ -24,11 +24,12 @@ few megabytes rather than the ~100 MB an Electron build would need.
 - **Outline** — built from the document headings, click to jump.
 - **Collapsible sidebar** — hide the whole left panel with the *Sidebar* button
   or `Ctrl+B`; the reading column re-centres in the full window width.
-- **Collapsible sections** — click *Outline* or *Documents* to fold that panel
-  away, so you can keep just the outline while reading.
-- **Resizable panels** — drag the divider between Outline and Documents to set
-  how much of a long outline is visible; arrow keys nudge it when focused, and
-  double-clicking it returns the panel to hugging its content.
+- **Show or hide either pane** — the *Outline* and *Documents* buttons (or
+  `Ctrl+O` / `Ctrl+D`) remove a pane entirely; hiding the document list leaves
+  the outline filling the sidebar, which is what you want while reading.
+- **Draggable split** — the sidebar is one column divided into two panes; drag
+  the divider to choose how much each gets. The split is remembered, arrow keys
+  nudge it, and double-clicking restores the default.
 - **Code highlighting, math, tables, task lists** — GitHub-flavoured Markdown
   through marked, Shiki (dual light/dark themes), and KaTeX.
 - **Reading controls** — column width, text size, and light/dark theme.
@@ -50,8 +51,8 @@ for inline and display equations.
 
 ![Code blocks and rendered math](docs/images/screenshot-code.png)
 
-**Sections fold away** — collapsing *Documents* leaves just the outline
-visible, and each section remembers its state.
+**Either pane can be hidden** — with the document list hidden the outline
+fills the sidebar, and the split is restored when it comes back.
 
 ![Documents section collapsed](docs/images/screenshot-sections.png)
 

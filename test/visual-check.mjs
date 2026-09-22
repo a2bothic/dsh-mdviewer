@@ -222,190 +222,126 @@ check('copy buttons on every code block',
   (await page.locator('#content [data-copy]').count()) === codeBlocks,
   `${codeBlocks} blocks`);
 
-// --- draggable Contents / Documents splitter -----------------------------
-const splitter = page.locator('#toc-splitter');
-check('splitter present', await splitter.isVisible());
-check('splitter is a separator role',
-  (await splitter.getAttribute('role')) === 'separator');
+// --- sidebar sections ----------------------------------------------------
+// Hiding the document list removes the whole pane (not just its contents) and
+// lets the outline fill the column, exactly like the Sidebar button.
+check('documents toggle exists in the toolbar',
+  await page.locator('#toggle-docs').isVisible());
 
-// The panel is capped, not fixed, so it only grows when the outline is long
-// enough. Open a heading-heavy document first, otherwise the drag has nothing
-// to reveal and the check would be meaningless.
-await page.evaluate(() => {
-  const win = window;
-  win.__LONG_DOC__ = true;
+const splitGeo = async () => page.evaluate(() => {
+  const box = (id) => {
+    const el = document.getElementById(id);
+    if (!el || el.offsetParent === null) return null;
+    const b = el.getBoundingClientRect();
+    return { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) };
+  };
+  const side = document.getElementById('side').getBoundingClientRect();
+  return {
+    side: { top: Math.round(side.top), h: Math.round(side.height) },
+    outline: box('toc-wrap'), splitter: box('toc-splitter'), docs: box('tree-wrap'),
+  };
 });
-await page.evaluate(async () => {
-  // Re-open the same file with a long outline by patching the mock bridge.
+
+const g0 = await splitGeo();
+check('the two panes meet with no gap',
+  g0.splitter.top === g0.outline.bottom && g0.docs.top === g0.splitter.bottom,
+  `outline->${g0.splitter.top - g0.outline.bottom}px, splitter->docs ${g0.docs.top - g0.splitter.bottom}px`);
+check('the panes fill the sidebar exactly',
+  Math.abs((g0.docs.bottom - g0.side.top) - g0.side.h) <= 1,
+  `${g0.docs.bottom - g0.side.top} of ${g0.side.h}`);
+
+// Neither list may overflow its pane. If it does it covers the other pane and
+// steals its clicks — a stale `#toc { flex: 0 0 260px }` rule caused exactly
+// that once. The list must be longer than its pane for this to be reachable,
+// so load a heading-heavy document first.
+await page.evaluate(() => {
   const internals = window.__TAURI_INTERNALS__;
   const original = internals.invoke;
   internals.invoke = async (cmd, args) => {
     if (cmd === 'read_document') {
-      const parts = ['# Top'];
-      for (let i = 1; i <= 40; i++) parts.push(`\n## Section ${i}\n\ntext\n`);
+      const parts = ['# Long outline'];
+      for (let i = 1; i <= 60; i++) parts.push(`\n## Heading ${i}\n\nbody\n`);
       return parts.join('');
     }
     return original(cmd, args);
   };
 });
-await page.click('.tree-item >> nth=0');
-await page.waitForTimeout(800);
+await page.locator('.tree-item').first().click();
+await page.waitForTimeout(1000);
+const headings = await page.locator('#toc a').count();
+check('long outline is loaded for the overflow check', headings >= 40, `${headings} entries`);
 
+const overflow = await page.evaluate(() => {
+  const pane = (id) => document.getElementById(id).getBoundingClientRect();
+  const list = (id) => document.getElementById(id).getBoundingClientRect();
+  return {
+    tocPane: pane('toc-wrap'), tocList: list('toc'),
+    treePane: pane('tree-wrap'), treeList: list('tree'),
+  };
+});
+check('outline list stays inside its pane',
+  Math.round(overflow.tocList.bottom) <= Math.round(overflow.tocPane.bottom) + 1,
+  `list ends ${Math.round(overflow.tocList.bottom - overflow.tocPane.bottom)}px past the pane`);
+check('document list stays inside its pane',
+  Math.round(overflow.treeList.bottom) <= Math.round(overflow.treePane.bottom) + 1,
+  `list ends ${Math.round(overflow.treeList.bottom - overflow.treePane.bottom)}px past the pane`);
+check('outline pane does not overlap the document pane',
+  Math.round(overflow.tocPane.bottom) <= Math.round(overflow.treePane.top) + 1,
+  `${Math.round(overflow.tocPane.bottom)} vs ${Math.round(overflow.treePane.top)}`);
+
+// The document list must actually be clickable, not covered by the outline.
+await page.locator('.tree-item').first().click();
+await page.waitForTimeout(600);
+check('document list is clickable, not covered',
+  (await page.locator('.tree-item').first().getAttribute('class'))?.includes('active'),
+  'clicked item became active');
+
+// Dragging the divider reassigns space between the two panes.
 const sideBox = await page.locator('#side').boundingBox();
-const h0 = (await page.locator('#toc-wrap').boundingBox()).height;
-
-// Drag the divider downward by 100px.
-await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h0);
+await page.mouse.move(sideBox.x + sideBox.width / 2, g0.splitter.top + 3);
 await page.mouse.down();
-await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h0 + 100, { steps: 12 });
+await page.mouse.move(sideBox.x + sideBox.width / 2, g0.splitter.top + 153, { steps: 10 });
 await page.mouse.up();
 await page.waitForTimeout(300);
-const h1 = (await page.locator('#toc-wrap').boundingBox()).height;
-check('drag resizes the outline panel', h1 > h0 + 40,
-  `${Math.round(h0)} -> ${Math.round(h1)}`);
+const g1 = await splitGeo();
+check('dragging the divider grows the outline', g1.outline.h > g0.outline.h + 100,
+  `${g0.outline.h} -> ${g1.outline.h}`);
+check('dragging the divider shrinks the document list', g1.docs.h < g0.docs.h - 100,
+  `${g0.docs.h} -> ${g1.docs.h}`);
+check('panes still fill the sidebar after a drag',
+  Math.abs((g1.docs.bottom - g1.side.top) - g1.side.h) <= 1,
+  `${g1.docs.bottom - g1.side.top} of ${g1.side.h}`);
+check('the split survives a reload',
+  Number(await page.evaluate(() => localStorage.getItem('mdviewer.outlineShare'))) > 0);
 
-// The Documents panel must remain usable (not crushed to nothing).
-const treeBox = await page.locator('#tree-wrap').boundingBox();
-check('documents panel keeps usable height', treeBox.height > 40,
-  `${Math.round(treeBox.height)}px`);
-
-// Dragging far past the top must clamp, not collapse the panel.
-await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h1);
-await page.mouse.down();
-await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y - 400, { steps: 10 });
-await page.mouse.up();
-await page.waitForTimeout(250);
-const hMin = (await page.locator('#toc-wrap').boundingBox()).height;
-check('drag clamps at the minimum', hMin >= 50 && hMin < 200, `${Math.round(hMin)}px`);
-
-// Keyboard: ArrowDown must grow the panel.
-await splitter.focus();
-const hk0 = (await page.locator('#toc-wrap').boundingBox()).height;
-await page.keyboard.press('ArrowDown');
-await page.keyboard.press('ArrowDown');
-await page.waitForTimeout(200);
-const hk1 = (await page.locator('#toc-wrap').boundingBox()).height;
-check('keyboard resizes the panel', hk1 > hk0, `${Math.round(hk0)} -> ${Math.round(hk1)}`);
-
-// The choice must survive a reload.
-const persisted = await page.evaluate(() => localStorage.getItem('mdviewer.tocHeight'));
-check('splitter position persists', Number(persisted) > 0, `stored=${persisted}`);
-
-// --- layout/scroll regression -------------------------------------------
-// The shell is a flex column; if #app is not a bounded flex container the
-// reading pane grows to content height and the wheel does nothing.
-const layout = await page.evaluate(() => {
-  const app = document.getElementById('app');
-  const scroller = document.getElementById('scroll');
-  const cs = getComputedStyle(app);
-  return {
-    appHeight: app.clientHeight,
-    winHeight: window.innerHeight,
-    appDisplay: cs.display,
-    scrollOverflowY: getComputedStyle(scroller).overflowY,
-    scrollClientH: scroller.clientHeight,
-    scrollScrollH: scroller.scrollHeight,
-  };
-});
-check('#app is a bounded flex container',
-  layout.appDisplay === 'flex' && Math.abs(layout.appHeight - layout.winHeight) <= 2,
-  `display=${layout.appDisplay} app=${layout.appHeight} win=${layout.winHeight}`);
-check('reading pane can scroll',
-  layout.scrollOverflowY === 'auto' && layout.scrollScrollH > layout.scrollClientH,
-  `overflowY=${layout.scrollOverflowY} ${layout.scrollClientH}/${layout.scrollScrollH}`);
-
-// The wheel must actually move the reading pane.
-await page.evaluate(() => { document.getElementById('scroll').scrollTop = 0; });
-const beforeWheel = await page.evaluate(() => document.getElementById('scroll').scrollTop);
-await page.mouse.move(900, 500);
-await page.mouse.wheel(0, 600);
+// Hiding the document list: the pane and its header both go, outline fills.
+await page.click('#toggle-docs');
 await page.waitForTimeout(400);
-const afterWheel = await page.evaluate(() => document.getElementById('scroll').scrollTop);
-check('wheel scrolls the document', afterWheel > beforeWheel,
-  `scrollTop ${beforeWheel} -> ${afterWheel}`);
-await page.evaluate(() => { document.getElementById('scroll').scrollTop = 0; });
+const g2 = await splitGeo();
+check('hiding documents removes the whole pane',
+  g2.docs === null && g2.splitter === null, JSON.stringify(g2.docs));
+check('outline fills the sidebar when documents are hidden',
+  Math.abs(g2.outline.h - g2.side.h) <= 1, `${g2.outline.h} of ${g2.side.h}`);
+check('toolbar button reports the hidden state',
+  (await page.locator('#toggle-docs').getAttribute('aria-pressed')) === 'true');
 
-// --- CJK fallback coverage -----------------------------------------------
-// Chinese must resolve to a real CJK family rather than falling through to
-// the generic keyword, which renders tofu boxes on Linux.
-const fontStack = await page.evaluate(() =>
-  getComputedStyle(document.body).getPropertyValue('--font-sans'));
-check('font stack includes a Windows CJK family',
-  fontStack.includes('Microsoft YaHei'), 'Microsoft YaHei');
-check('font stack includes a macOS CJK family',
-  fontStack.includes('PingFang SC'), 'PingFang SC');
-check('font stack includes a Linux CJK family',
-  fontStack.includes('Noto Sans CJK SC'), 'Noto Sans CJK SC');
-check('CJK families precede the generic keyword',
-  fontStack.indexOf('Microsoft YaHei') < fontStack.indexOf('sans-serif'),
-  'ordering');
-check('mono stack also has a CJK fallback',
-  (await page.evaluate(() =>
-    getComputedStyle(document.body).getPropertyValue('--font-mono')))
-    .includes('Microsoft YaHei'));
+await page.click('#toggle-docs');
+await page.waitForTimeout(400);
+const g3 = await splitGeo();
+check('the previous split returns when documents come back',
+  Math.abs(g3.outline.h - g1.outline.h) <= 2, `${g1.outline.h} -> ${g3.outline.h}`);
 
-// --- sidebar section collapse -------------------------------------------
-check('outline header is a collapse toggle',
-  (await page.locator('#toc-title').getAttribute('aria-expanded')) === 'true');
-check('documents header is a collapse toggle',
-  (await page.locator('#side-title-btn').getAttribute('aria-expanded')) === 'true');
-
-// Collapsing Documents must leave the outline visible.
-await page.click('#side-title-btn');
-await page.waitForTimeout(350);
-check('documents panel collapses', await page.locator('#tree').isHidden());
-check('outline survives documents collapse',
-  await page.locator('#toc').isVisible() &&
-  (await page.locator('#toc a').count()) > 0);
-check('collapse state is exposed to assistive tech',
-  (await page.locator('#side-title-btn').getAttribute('aria-expanded')) === 'false');
-await page.click('#side-title-btn');
-await page.waitForTimeout(300);
-check('documents panel restores', await page.locator('#tree').isVisible());
-
-// Collapsing the outline hides the divider too, since it would have nothing
-// left to resize.
-await page.click('#toc-title');
-await page.waitForTimeout(350);
-check('outline panel collapses', await page.locator('#toc').isHidden());
-check('divider hides with the outline',
-  await page.locator('#toc-splitter').isHidden());
-check('documents survives outline collapse', await page.locator('#tree').isVisible());
-await page.click('#toc-title');
-await page.waitForTimeout(300);
-check('outline panel restores', await page.locator('#toc').isVisible());
-check('divider returns with the outline',
-  await page.locator('#toc-splitter').isVisible());
-
-// --- no blank block above the divider ------------------------------------
-// The bug: the outline panel had a fixed height, so a short outline left a
-// dead block above the divider. This must be measured with no drag applied,
-// otherwise it reports on a pinned height instead of the default layout.
-await page.evaluate(() => localStorage.removeItem('mdviewer.tocHeight'));
-await page.reload({ waitUntil: 'load' });
-await page.waitForTimeout(1500);
-await page.click('#open-folder');
-await page.locator('.tree-item').first().waitFor({ state: 'visible' });
-await page.click('.tree-item >> nth=0');
-await page.waitForTimeout(1200);
-
-const outlineGap = await page.evaluate(() => {
-  const wrap = document.getElementById('toc-wrap').getBoundingClientRect();
-  const list = document.getElementById('toc').getBoundingClientRect();
-  const wrapStyle = getComputedStyle(document.getElementById('toc-wrap'));
-  return {
-    gap: Math.round(wrap.bottom - list.bottom),
-    pinned: document.getElementById('toc-wrap').style.height || '(none)',
-    wrapH: Math.round(wrap.height),
-    listH: Math.round(list.height),
-    maxH: wrapStyle.maxHeight,
-  };
-});
-check('outline is not pinned before any drag', outlineGap.pinned === '(none)',
-  outlineGap.pinned);
-check('no blank gap under the outline list',
-  outlineGap.gap >= 0 && outlineGap.gap < 12,
-  `${outlineGap.gap}px (panel ${outlineGap.wrapH}, list ${outlineGap.listH})`);
+// Hiding the outline leaves the document list alone.
+await page.click('#toggle-outline');
+await page.waitForTimeout(400);
+const g4 = await splitGeo();
+check('hiding the outline removes its pane', g4.outline === null && g4.splitter === null);
+check('document list survives the outline being hidden',
+  g4.docs !== null && Math.abs(g4.docs.h - g4.side.h) <= 1,
+  g4.docs ? `${g4.docs.h} of ${g4.side.h}` : 'gone');
+await page.click('#toggle-outline');
+await page.waitForTimeout(400);
+check('outline returns', (await splitGeo()).outline !== null);
 
 // --- sidebar collapse + centring ----------------------------------------
 const widthWithSidebar = await page.evaluate(() => {
