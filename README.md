@@ -54,6 +54,23 @@ reading column in the full window width.
 |---|---|
 | ![Dark theme](docs/images/screenshot-dark.png) | ![Collapsed sidebar](docs/images/screenshot-collapsed.png) |
 
+## Install
+
+Download the latest installer from the
+[releases page](https://github.com/a2bothic/dsh-mdviewer/releases/latest):
+
+| Platform | File | Size |
+|---|---|---|
+| Windows (installer) | `Markdown.Viewer_0.1.0_x64-setup.exe` | 2.2 MB |
+| Windows (MSI) | `Markdown.Viewer_0.1.0_x64_en-US.msi` | 2.7 MB |
+| Windows (portable) | `dsh-mdviewer.exe` | 4.2 MB |
+| macOS (universal) | `Markdown.Viewer_0.1.0_universal.dmg` | 5.0 MB |
+| Linux (Debian) | `Markdown.Viewer_0.1.0_amd64.deb` | 2.9 MB |
+| Linux (AppImage) | `Markdown.Viewer_0.1.0_amd64.AppImage` | 78 MB |
+
+The Windows executables are not code-signed, so SmartScreen may warn on first
+run: choose **More info** then **Run anyway**.
+
 ## Requirements
 
 | | |

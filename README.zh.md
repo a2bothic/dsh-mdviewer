@@ -48,6 +48,23 @@
 |---|---|
 | ![暗色主题](docs/images/screenshot-dark.png) | ![侧边栏收起](docs/images/screenshot-collapsed.png) |
 
+## 安装
+
+从 [Releases 页面](https://github.com/a2bothic/dsh-mdviewer/releases/latest)
+下载对应平台的安装包：
+
+| 平台 | 文件 | 大小 |
+|---|---|---|
+| Windows（安装包） | `Markdown.Viewer_0.1.0_x64-setup.exe` | 2.2 MB |
+| Windows（MSI） | `Markdown.Viewer_0.1.0_x64_en-US.msi` | 2.7 MB |
+| Windows（免安装） | `dsh-mdviewer.exe` | 4.2 MB |
+| macOS（通用二进制） | `Markdown.Viewer_0.1.0_universal.dmg` | 5.0 MB |
+| Linux（Debian） | `Markdown.Viewer_0.1.0_amd64.deb` | 2.9 MB |
+| Linux（AppImage） | `Markdown.Viewer_0.1.0_amd64.AppImage` | 78 MB |
+
+Windows 可执行文件未做代码签名，首次运行可能触发 SmartScreen 警告：
+点「更多信息」→「仍要运行」即可。
+
 ## 环境要求
 
 | | |
