@@ -9,29 +9,32 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright';
 
-const ROOT = '/home/neeq/test/dsh-mdviewer';
+// Resolve everything relative to this file so the suite runs anywhere,
+// including CI, rather than depending on a developer's checkout path.
+const ROOT = path.resolve(import.meta.dirname, '..');
 const OUT = path.join(ROOT, 'test-output');
 fs.mkdirSync(OUT, { recursive: true });
 
-const md = fs.readFileSync('/home/neeq/test/mdreader/test/typography-test.md', 'utf8');
+const md = fs.readFileSync(path.join(ROOT, 'test', 'fixture.md'), 'utf8');
 
-// Only the full Chromium build is present locally (the separate headless
-// shell download failed), so point the launcher at it explicitly.
+// Point the launcher at a specific browser when one is supplied; otherwise
+// let Playwright resolve the one it installed.
 const CHROME = process.env.MDREADER_CHROME || '';
 // A writable profile directory is required in this environment, which means
 // the persistent-context API rather than launch().
+//
+// `--headless=old` works around a crashpad failure in the sandboxed container
+// this suite was developed in. It is opt-in via MDREADER_HEADLESS_OLD so CI
+// uses Playwright's normal headless mode.
+const args = ['--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage'];
+if (process.env.MDREADER_HEADLESS_OLD === '1') args.push('--headless=old');
+
 const context = await chromium.launchPersistentContext(
   path.join(ROOT, '.chrome-profile'),
   {
     ...(CHROME && fs.existsSync(CHROME) ? { executablePath: CHROME } : {}),
     viewport: { width: 1280, height: 900 },
-    args: [
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      // No working crashpad here, so force the legacy headless path.
-      '--headless=old',
-    ],
+    args,
   },
 );
 const page = context.pages()[0] ?? await context.newPage();
@@ -111,8 +114,12 @@ await page.locator('#content span[style*="color"]').first()
 
 check('content visible', await page.locator('#content').isVisible());
 check('h1 rendered', (await page.locator('#content h1').count()) >= 1);
-check('toc populated', (await page.locator('#toc a').count()) >= 10,
-  `${await page.locator('#toc a').count()} entries`);
+const tocCount = await page.locator('#toc a').count();
+check('toc populated', tocCount >= 5, `${tocCount} entries`);
+// Every heading in the fixture must reach the table of contents.
+const headingCount = await page.locator('#content h1, #content h2, #content h3, #content h4').count();
+check('toc lists every heading', tocCount === headingCount,
+  `toc=${tocCount} headings=${headingCount}`);
 
 // Shiki highlighting present in the DOM.
 const tokens = await page.locator('#content span[style*="color"]').count();
@@ -210,7 +217,10 @@ check('width control works',
   `${Math.round(wideBefore)} -> ${Math.round(wideCol)}`);
 
 // Copy button exists on every code block.
-check('copy buttons', (await page.locator('#content [data-copy]').count()) === 4);
+const codeBlocks = await page.locator('#content .code-block').count();
+check('copy buttons on every code block',
+  (await page.locator('#content [data-copy]').count()) === codeBlocks,
+  `${codeBlocks} blocks`);
 
 // --- draggable Contents / Documents splitter -----------------------------
 const splitter = page.locator('#toc-splitter');
