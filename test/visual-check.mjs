@@ -228,17 +228,40 @@ check('splitter present', await splitter.isVisible());
 check('splitter is a separator role',
   (await splitter.getAttribute('role')) === 'separator');
 
+// The panel is capped, not fixed, so it only grows when the outline is long
+// enough. Open a heading-heavy document first, otherwise the drag has nothing
+// to reveal and the check would be meaningless.
+await page.evaluate(() => {
+  const win = window;
+  win.__LONG_DOC__ = true;
+});
+await page.evaluate(async () => {
+  // Re-open the same file with a long outline by patching the mock bridge.
+  const internals = window.__TAURI_INTERNALS__;
+  const original = internals.invoke;
+  internals.invoke = async (cmd, args) => {
+    if (cmd === 'read_document') {
+      const parts = ['# Top'];
+      for (let i = 1; i <= 40; i++) parts.push(`\n## Section ${i}\n\ntext\n`);
+      return parts.join('');
+    }
+    return original(cmd, args);
+  };
+});
+await page.click('.tree-item >> nth=0');
+await page.waitForTimeout(800);
+
 const sideBox = await page.locator('#side').boundingBox();
 const h0 = (await page.locator('#toc-wrap').boundingBox()).height;
 
-// Drag the divider downward by 120px.
+// Drag the divider downward by 100px.
 await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h0);
 await page.mouse.down();
-await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h0 + 120, { steps: 12 });
+await page.mouse.move(sideBox.x + sideBox.width / 2, sideBox.y + h0 + 100, { steps: 12 });
 await page.mouse.up();
-await page.waitForTimeout(250);
+await page.waitForTimeout(300);
 const h1 = (await page.locator('#toc-wrap').boundingBox()).height;
-check('drag resizes the contents panel', Math.abs(h1 - (h0 + 120)) < 12,
+check('drag resizes the outline panel', h1 > h0 + 40,
   `${Math.round(h0)} -> ${Math.round(h1)}`);
 
 // The Documents panel must remain usable (not crushed to nothing).
@@ -320,6 +343,69 @@ check('mono stack also has a CJK fallback',
   (await page.evaluate(() =>
     getComputedStyle(document.body).getPropertyValue('--font-mono')))
     .includes('Microsoft YaHei'));
+
+// --- sidebar section collapse -------------------------------------------
+check('outline header is a collapse toggle',
+  (await page.locator('#toc-title').getAttribute('aria-expanded')) === 'true');
+check('documents header is a collapse toggle',
+  (await page.locator('#side-title-btn').getAttribute('aria-expanded')) === 'true');
+
+// Collapsing Documents must leave the outline visible.
+await page.click('#side-title-btn');
+await page.waitForTimeout(350);
+check('documents panel collapses', await page.locator('#tree').isHidden());
+check('outline survives documents collapse',
+  await page.locator('#toc').isVisible() &&
+  (await page.locator('#toc a').count()) > 0);
+check('collapse state is exposed to assistive tech',
+  (await page.locator('#side-title-btn').getAttribute('aria-expanded')) === 'false');
+await page.click('#side-title-btn');
+await page.waitForTimeout(300);
+check('documents panel restores', await page.locator('#tree').isVisible());
+
+// Collapsing the outline hides the divider too, since it would have nothing
+// left to resize.
+await page.click('#toc-title');
+await page.waitForTimeout(350);
+check('outline panel collapses', await page.locator('#toc').isHidden());
+check('divider hides with the outline',
+  await page.locator('#toc-splitter').isHidden());
+check('documents survives outline collapse', await page.locator('#tree').isVisible());
+await page.click('#toc-title');
+await page.waitForTimeout(300);
+check('outline panel restores', await page.locator('#toc').isVisible());
+check('divider returns with the outline',
+  await page.locator('#toc-splitter').isVisible());
+
+// --- no blank block above the divider ------------------------------------
+// The bug: the outline panel had a fixed height, so a short outline left a
+// dead block above the divider. This must be measured with no drag applied,
+// otherwise it reports on a pinned height instead of the default layout.
+await page.evaluate(() => localStorage.removeItem('mdviewer.tocHeight'));
+await page.reload({ waitUntil: 'load' });
+await page.waitForTimeout(1500);
+await page.click('#open-folder');
+await page.locator('.tree-item').first().waitFor({ state: 'visible' });
+await page.click('.tree-item >> nth=0');
+await page.waitForTimeout(1200);
+
+const outlineGap = await page.evaluate(() => {
+  const wrap = document.getElementById('toc-wrap').getBoundingClientRect();
+  const list = document.getElementById('toc').getBoundingClientRect();
+  const wrapStyle = getComputedStyle(document.getElementById('toc-wrap'));
+  return {
+    gap: Math.round(wrap.bottom - list.bottom),
+    pinned: document.getElementById('toc-wrap').style.height || '(none)',
+    wrapH: Math.round(wrap.height),
+    listH: Math.round(list.height),
+    maxH: wrapStyle.maxHeight,
+  };
+});
+check('outline is not pinned before any drag', outlineGap.pinned === '(none)',
+  outlineGap.pinned);
+check('no blank gap under the outline list',
+  outlineGap.gap >= 0 && outlineGap.gap < 12,
+  `${outlineGap.gap}px (panel ${outlineGap.wrapH}, list ${outlineGap.listH})`);
 
 // --- sidebar collapse + centring ----------------------------------------
 const widthWithSidebar = await page.evaluate(() => {

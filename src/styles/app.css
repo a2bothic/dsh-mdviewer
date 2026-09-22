@@ -124,9 +124,16 @@ body.side-collapsed #side { display: none; }
 }
 
 #toc-wrap {
-  flex: 0 0 auto;
-  /* Height is driven by --toc-h, which the splitter drag updates. */
-  height: var(--toc-h, 38%);
+  /* Two requirements pull against each other:
+   *   a short outline must hug its content, leaving no blank block above the
+   *   divider, while a long one must be able to grow to the cap the splitter
+   *   sets so dragging it reveals more of the list.
+   * `flex-grow` on its own fails the first (the flex container hands over the
+   * free space regardless of content), so the panel is sized from its content
+   * and only *permitted* to reach the cap; the inner list scrolls past it. */
+  flex: 0 1 auto;
+  max-height: var(--toc-h, 38%);
+  height: fit-content;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -172,19 +179,54 @@ body.side-collapsed #side { display: none; }
   min-height: 0;
 }
 
+/* Section headers double as collapse toggles, so they are buttons that keep
+   the original label styling. */
 .side-title {
   flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  font: inherit;
   font-size: 11px;
   line-height: 16px;
   font-weight: 600;
   letter-spacing: .04em;
   text-transform: uppercase;
+  text-align: left;
   color: var(--label-caption);
+  background: transparent;
+  border: none;
   padding: 10px 14px 6px;
+  cursor: pointer;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
+.side-title:hover { color: var(--label-secondary); }
+.side-title:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--link);
+  border-radius: 4px;
+}
+/* Chevron points down when open and right when collapsed. */
+.side-title .chev {
+  flex: 0 0 auto;
+  width: 0;
+  height: 0;
+  border-left: 4px solid currentColor;
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transform: rotate(90deg);
+  transition: transform .15s var(--ds-ease-in-out, ease-in-out);
+  opacity: .75;
+}
+.side-title[aria-expanded="false"] .chev { transform: rotate(0deg); }
+
+/* A collapsed section shows only its header. */
+#toc-wrap.collapsed,
+#tree-wrap.collapsed { flex: 0 0 auto; }
+#toc-wrap.collapsed { max-height: none !important; }
+#toc-wrap.collapsed .side-title,
+#tree-wrap.collapsed .side-title { padding-bottom: 8px; }
 
 /* --------------------------------- TOC ---------------------------------- */
 .toc {

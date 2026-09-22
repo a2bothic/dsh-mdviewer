@@ -21,6 +21,8 @@ const state = {
   headings: [] as Heading[],
   view: 'files' as 'files' | 'search',
   sideOpen: true,
+  outlineOpen: true,
+  docsOpen: true,
 };
 
 /* ------------------------------- Boot markup ---------------------------- */
@@ -38,13 +40,19 @@ $('#app').innerHTML = `
 <div id="main">
   <aside id="side">
     <div id="toc-wrap">
-      <div class="side-title">Contents</div>
+      <button class="side-title" id="toc-title" type="button"
+              aria-expanded="true" aria-controls="toc" title="Collapse">
+        <span class="chev" aria-hidden="true"></span><span>Outline</span>
+      </button>
       <nav id="toc" class="toc"></nav>
     </div>
     <div id="toc-splitter" role="separator" aria-orientation="horizontal"
-         aria-label="Resize contents panel" tabindex="0"></div>
+         aria-label="Resize outline panel" tabindex="0"></div>
     <div id="tree-wrap">
-      <div class="side-title" id="side-title">Documents</div>
+      <button class="side-title" id="side-title-btn" type="button"
+              aria-expanded="true" aria-controls="tree" title="Collapse">
+        <span class="chev" aria-hidden="true"></span><span id="side-title">Documents</span>
+      </button>
       <div id="tree" class="tree"></div>
     </div>
   </aside>
@@ -264,23 +272,78 @@ window.addEventListener('keydown', (e: KeyboardEvent) => {
   }
 });
 
-/* --------------------- Contents / Documents splitter -------------------- */
-// The divider sets an explicit pixel height on the Contents panel. Pixels (not
-// a percentage) are used because the sidebar crosses no breakpoint during a
-// drag, so the value stays stable while the pointer moves.
+// Sidebar element handles, looked up once and reused by the splitter and the
+// section toggles below.
 const tocWrap = $('#toc-wrap');
 const splitter = $('#toc-splitter');
+const treeWrap = $('#tree-wrap');
+const tocTitle = $('#toc-title');
+const treeTitle = $('#side-title-btn');
 const side = $('#side');
 const tocMinPx = 60;
 
-function setTocHeight(px: number, persist = true): void {
+/* -------------------- Collapsible sidebar sections ---------------------- */
+// Each section header toggles its own panel, so collapsing Documents leaves
+// the outline visible (and vice versa). Hiding both is the sidebar button's
+// job; these are per-section.
+function setSectionOpen(
+  key: 'outline' | 'documents',
+  open: boolean,
+  persist = true,
+): void {
+  const isOutline = key === 'outline';
+  const panel = isOutline ? tocWrap : treeWrap;
+  const button = isOutline ? tocTitle : treeTitle;
+  const content = isOutline ? $('#toc') : $('#tree');
+
+  panel.classList.toggle('collapsed', !open);
+  content.hidden = !open;
+  button.setAttribute('aria-expanded', String(open));
+  button.title = open ? 'Collapse' : 'Expand';
+  // The divider is meaningless while the outline is collapsed.
+  if (isOutline) splitter.hidden = !open;
+
+  if (isOutline) state.outlineOpen = open; else state.docsOpen = open;
+
+  if (persist) {
+    try {
+      localStorage.setItem(`mdviewer.${key}Open`, open ? '1' : '0');
+    } catch { /* ignore */ }
+  }
+  // Re-clamp the outline cap now that the available height has changed.
+  if (open && tocWrap.style.height) {
+    requestAnimationFrame(
+      () => setTocHeight(parseFloat(tocWrap.style.height), false, true));
+  }
+}
+
+tocTitle.addEventListener('click', () => setSectionOpen('outline', !state.outlineOpen));
+treeTitle.addEventListener('click', () => setSectionOpen('documents', !state.docsOpen));
+
+/* --------------------- Outline / Documents splitter --------------------- */
+// The divider controls how much of a long outline is visible.
+//
+// While nobody has dragged it, the panel simply hugs its content (CSS
+// max-height + fit-content), so a short outline leaves no blank block above
+// the divider. Dragging is an explicit request for a specific size, so from
+// the first drag onward the panel is pinned to an explicit height instead —
+// that is the only way "hug the content" and "grow when asked" can coexist.
+function setTocHeight(px: number, persist = true, pin = false): void {
   const max = Math.max(tocMinPx, side.clientHeight - tocMinPx);
   const h = Math.round(Math.min(Math.max(px, tocMinPx), max));
-  tocWrap.style.height = `${h}px`;
+  tocWrap.style.maxHeight = `${h}px`;
+  if (pin) tocWrap.style.height = `${h}px`;
   splitter.setAttribute('aria-valuenow', String(h));
   if (persist) {
     try { localStorage.setItem('mdviewer.tocHeight', String(h)); } catch { /* ignore */ }
   }
+}
+
+/** Let the panel hug its content again. */
+function unpinTocHeight(): void {
+  tocWrap.style.height = '';
+  tocWrap.style.maxHeight = '';
+  try { localStorage.removeItem('mdviewer.tocHeight'); } catch { /* ignore */ }
 }
 
 let dragging = false;
@@ -294,8 +357,9 @@ splitter.addEventListener('pointerdown', (e: PointerEvent) => {
 
 splitter.addEventListener('pointermove', (e: PointerEvent) => {
   if (!dragging) return;
-  // Height is measured from the top of the sidebar to the pointer.
-  setTocHeight(e.clientY - side.getBoundingClientRect().top);
+  // Measured from the top of the sidebar to the pointer. The title bar sits
+  // inside the panel, so the drag height is the pointer offset directly.
+  setTocHeight(e.clientY - side.getBoundingClientRect().top, true, true);
 });
 
 function endDrag(e: PointerEvent): void {
@@ -307,19 +371,28 @@ function endDrag(e: PointerEvent): void {
 splitter.addEventListener('pointerup', endDrag);
 splitter.addEventListener('pointercancel', endDrag);
 
-// Keyboard access: arrows nudge, Home/End jump to the extremes.
+// Keyboard access: arrows nudge, Home/End jump to the extremes. Any keyboard
+// adjustment also pins the height, for the same reason a drag does.
 splitter.addEventListener('keydown', (e: KeyboardEvent) => {
   const cur = tocWrap.getBoundingClientRect().height;
   const step = e.shiftKey ? 40 : 10;
-  if (e.key === 'ArrowUp') { setTocHeight(cur - step); e.preventDefault(); }
-  else if (e.key === 'ArrowDown') { setTocHeight(cur + step); e.preventDefault(); }
-  else if (e.key === 'Home') { setTocHeight(tocMinPx); e.preventDefault(); }
-  else if (e.key === 'End') { setTocHeight(side.clientHeight); e.preventDefault(); }
+  if (e.key === 'ArrowUp') { setTocHeight(cur - step, true, true); e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { setTocHeight(cur + step, true, true); e.preventDefault(); }
+  else if (e.key === 'Home') { setTocHeight(tocMinPx, true, true); e.preventDefault(); }
+  else if (e.key === 'End') { setTocHeight(side.clientHeight, true, true); e.preventDefault(); }
 });
 
-// Keep a stored pixel height valid when the window is resized.
+// Double-click resets to hugging the content.
+splitter.addEventListener('dblclick', () => {
+  unpinTocHeight();
+  splitter.setAttribute('aria-valuenow', String(Math.round(tocWrap.getBoundingClientRect().height)));
+});
+
+// Keep a pinned pixel height valid when the window is resized.
 window.addEventListener('resize', () => {
-  if (tocWrap.style.height) setTocHeight(parseFloat(tocWrap.style.height), false);
+  if (tocWrap.style.height) {
+    setTocHeight(parseFloat(tocWrap.style.height), false, true);
+  }
 });
 
 const WIDTHS: Array<[string, string]> = [
@@ -373,11 +446,17 @@ try {
   setSidebarOpen(localStorage.getItem('mdviewer.sidebarOpen') !== '0', false);
 } catch { setSidebarOpen(true, false); }
 
+// Same for the two sidebar sections.
+try {
+  setSectionOpen('outline', localStorage.getItem('mdviewer.outlineOpen') !== '0', false);
+  setSectionOpen('documents', localStorage.getItem('mdviewer.documentsOpen') !== '0', false);
+} catch { /* ignore */ }
+
 // Restore the saved splitter position once the sidebar has a measured height.
 try {
   const savedToc = parseFloat(localStorage.getItem('mdviewer.tocHeight') ?? '');
   if (Number.isFinite(savedToc) && savedToc > 0) {
-    requestAnimationFrame(() => setTocHeight(savedToc, false));
+    requestAnimationFrame(() => setTocHeight(savedToc, false, true));
   }
 } catch { /* ignore */ }
 

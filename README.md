@@ -21,11 +21,14 @@ few megabytes rather than the ~100 MB an Electron build would need.
   file, line number, and the matching line with the hit highlighted.
 - **Reading typography** — the column, rhythm, and font stack are ported from
   the DeepSeek Harness front end (see [Typography](#typography)).
-- **Table of contents** — built from the document headings, click to jump.
+- **Outline** — built from the document headings, click to jump.
 - **Collapsible sidebar** — hide the whole left panel with the *Sidebar* button
   or `Ctrl+B`; the reading column re-centres in the full window width.
-- **Resizable panels** — drag the divider between Contents and Documents to set
-  how much room each gets; arrow keys nudge it when focused.
+- **Collapsible sections** — click *Outline* or *Documents* to fold that panel
+  away, so you can keep just the outline while reading.
+- **Resizable panels** — drag the divider between Outline and Documents to set
+  how much of a long outline is visible; arrow keys nudge it when focused, and
+  double-clicking it returns the panel to hugging its content.
 - **Code highlighting, math, tables, task lists** — GitHub-flavoured Markdown
   through marked, Shiki (dual light/dark themes), and KaTeX.
 - **Reading controls** — column width, text size, and light/dark theme.
@@ -46,6 +49,11 @@ excerpt; click one to open it.
 for inline and display equations.
 
 ![Code blocks and rendered math](docs/images/screenshot-code.png)
+
+**Sections fold away** — collapsing *Documents* leaves just the outline
+visible, and each section remembers its state.
+
+![Documents section collapsed](docs/images/screenshot-sections.png)
 
 **Dark theme** and a **collapsible sidebar** — hiding the panel re-centres the
 reading column in the full window width.
