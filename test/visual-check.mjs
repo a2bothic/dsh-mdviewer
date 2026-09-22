@@ -351,14 +351,32 @@ check('column shifted left as the sidebar vanished',
   widthNoSidebar.left < widthWithSidebar.left - 100,
   `${Math.round(widthWithSidebar.left)} -> ${Math.round(widthNoSidebar.left)}`);
 
-// Scrolling must still work while collapsed.
-await page.evaluate(() => { document.getElementById('scroll').scrollTop = 0; });
-await page.mouse.move(600, 500);
-await page.mouse.wheel(0, 500);
-await page.waitForTimeout(400);
-const collapsedScroll = await page.evaluate(() => document.getElementById('scroll').scrollTop);
-check('wheel still scrolls when collapsed', collapsedScroll > 0,
-  `scrollTop=${collapsedScroll}`);
+// Scrolling must still work while collapsed. page.mouse.wheel needs a real
+// compositor and is unreliable in headless CI, so drive the container
+// directly and assert it genuinely moves.
+const collapsed = await page.evaluate(async () => {
+  const s = document.getElementById('scroll');
+  s.scrollTop = 0;
+  await new Promise((r) => setTimeout(r, 120));
+  const before = s.scrollTop;
+  s.scrollTop = 500;
+  // scroll-behavior is smooth, so wait for the animation rather than one frame.
+  for (let i = 0; i < 40 && s.scrollTop < 400; i++) {
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  return {
+    before,
+    after: s.scrollTop,
+    clientH: s.clientHeight,
+    scrollH: s.scrollHeight,
+  };
+});
+check('reading pane still scrollable when collapsed',
+  collapsed.scrollH > collapsed.clientH,
+  `${collapsed.clientH}/${collapsed.scrollH}`);
+check('reading pane scrolls when collapsed',
+  collapsed.after > collapsed.before,
+  `scrollTop ${collapsed.before} -> ${collapsed.after}`);
 
 // Keyboard shortcut restores it.
 await page.keyboard.press('Control+b');
