@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (for example v0.1.0)'
+        required: true
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            args: ''
+          - os: ubuntu-22.04
+            label: Linux
+            args: ''
+          - os: macos-latest
+            label: macOS
+            args: '--target universal-apple-darwin'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS builds a universal binary, so both slices are required.
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install Linux dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build the app
+        run: pnpm exec tauri build ${{ matrix.args }}
+
+      # Collect every artifact into one directory so the upload and the release
+      # step do not need per-platform path lists.
+      - name: Collect artifacts
+        shell: bash
+        run: |
+          mkdir -p artifacts
+          find src-tauri/target -type f \
+            \( -name '*.exe' -o -name '*.msi' -o -name '*.deb' \
+               -o -name '*.AppImage' -o -name '*.dmg' \) \
+            -not -path '*/deps/*' -not -path '*/build/*' \
+            -exec cp {} artifacts/ \; 2>/dev/null || true
+          # The Linux AppImage/deb and the bare binary keep their names; make
+          # sure something was produced so a silent failure is visible.
+          ls -la artifacts/
+          test "$(ls -A artifacts)" || { echo "no artifacts produced"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}-artifacts
+          path: artifacts/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List files to publish
+        run: ls -la dist/
+
+      - name: Create the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          name: ${{ github.event.inputs.tag || github.ref_name }}
+          generate_release_notes: true
+          draft: false
+          files: dist/*
+          body: |
+            Installers for every supported platform are attached below.
+
+            **Windows** — run `*_x64-setup.exe` to install, or use the bare
+            `dsh-mdviewer.exe` as a portable build with no installation.
+
+            > The executables are not code-signed, so Windows SmartScreen may
+            > warn on first run. Choose "More info" then "Run anyway".

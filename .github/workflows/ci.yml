@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # Typecheck, build the front end, and run the Rust unit tests. The Rust tests
+  # exercise only the filesystem/search logic, so they run on a plain runner
+  # without the GTK/WebKit system libraries Tauri needs to link.
+  test:
+    name: Front end and Rust logic
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Build front end
+        run: pnpm build
+
+      - name: Rust unit tests
+        run: bash scripts/test-rust.sh
+
+  # Drive the real production bundle in Chromium and assert the DOM plus the
+  # computed typography, so a CSS regression fails the build.
+  visual:
+    name: Browser checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Build front end
+        run: pnpm build
+
+      - name: Start preview server
+        run: |
+          pnpm exec vite preview --port 4173 &
+          # Wait for the server rather than sleeping a fixed amount.
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:4173/; then break; fi
+            sleep 1
+          done
+          curl -sf -o /dev/null http://localhost:4173/ || {
+            echo "preview server did not start"; exit 1; }
+
+      - name: Browser checks
+        run: node test/visual-check.mjs
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-output
+          path: test-output/
+          if-no-files-found: ignore
+
+  # Confirm the app actually compiles and bundles on Windows, which is where
+  # the two build pitfalls documented in the README appear.
+  build-windows:
+    name: Windows build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build:desktop
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/dsh-mdviewer.exe
+          if-no-files-found: error

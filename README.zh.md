@@ -2,11 +2,15 @@
 
 [English](README.md) | **中文**
 
+[![CI](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml)
+
 一个轻量的桌面 Markdown 文档浏览器：打开一个文件夹，浏览其中的文档并做全文搜索，
 排版沿用 DeepSeek Harness Web GUI 的阅读样式。
 
 基于 **Tauri v2**（Rust 后端 + 系统自带 WebView）构建，因此安装包只有几 MB，
 而 Electron 方案需要约 100 MB。
+
+![阅读界面](docs/images/screenshot-light.png)
 
 ## 功能
 
@@ -27,6 +31,22 @@
 偏好设置（主题、侧边栏状态、分隔条位置）保存在 `localStorage` 中。
 
 **刻意不做**的功能：编辑、笔记双链、同步、插件、Agent、终端。这是一个纯粹的阅读器。
+
+## 界面一览
+
+**全文搜索** —— 结果带上文件名、行号和高亮片段，点击即可打开。
+
+![侧边栏搜索结果](docs/images/screenshot-search.png)
+
+**代码与公式** —— Shiki 高亮，明暗双主题；公式由 KaTeX 渲染。
+
+![代码块与公式渲染](docs/images/screenshot-code.png)
+
+**暗色主题**与**可收起的侧边栏** —— 收起后文档区在整个窗口宽度内重新居中。
+
+| 暗色主题 | 侧边栏收起 |
+|---|---|
+| ![暗色主题](docs/images/screenshot-dark.png) | ![侧边栏收起](docs/images/screenshot-collapsed.png) |
 
 ## 环境要求
 

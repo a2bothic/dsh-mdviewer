@@ -2,12 +2,16 @@
 
 **English** | [中文](README.zh.md)
 
+[![CI](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml)
+
 A lightweight desktop Markdown document viewer: browse a folder of documents
 and search their full text, rendered with the reading typography used by the
 DeepSeek Harness web GUI.
 
 Built with **Tauri v2** (Rust backend + system webview), so the installer is a
 few megabytes rather than the ~100 MB an Electron build would need.
+
+![Reading view](docs/images/screenshot-light.png)
 
 ## What it does
 
@@ -30,6 +34,25 @@ Preferences (theme, sidebar state, splitter position) persist in `localStorage`.
 
 Deliberately **not** included: editing, note graphs, sync, plugins, an agent,
 or a terminal. This is a viewer.
+
+## In pictures
+
+**Full-text search** — results carry the file, line number, and a highlighted
+excerpt; click one to open it.
+
+![Search results in the sidebar](docs/images/screenshot-search.png)
+
+**Code and math** — Shiki highlighting with dual light/dark themes, and KaTeX
+for inline and display equations.
+
+![Code blocks and rendered math](docs/images/screenshot-code.png)
+
+**Dark theme** and a **collapsible sidebar** — hiding the panel re-centres the
+reading column in the full window width.
+
+| Dark theme | Sidebar collapsed |
+|---|---|
+| ![Dark theme](docs/images/screenshot-dark.png) | ![Collapsed sidebar](docs/images/screenshot-collapsed.png) |
 
 ## Requirements
 

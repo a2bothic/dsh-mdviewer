@@ -97,14 +97,17 @@ await page.screenshot({ path: path.join(OUT, '01-welcome.png') });
 
 // Open a folder through the mocked picker.
 await page.click('#open-folder');
-await page.waitForTimeout(400);
+await page.locator('.tree-item').first().waitFor({ state: 'visible', timeout: 10000 });
 const treeCount = await page.locator('.tree-item').count();
 check('file tree populated', treeCount === 3, `${treeCount} items`);
 check('tree groups by dir', (await page.locator('.tree-dir').count()) === 1);
 
-// Open a document.
+// Open a document, then wait for the async highlighter to colour a token
+// rather than sleeping a fixed amount.
 await page.click('.tree-item >> nth=0');
-await page.waitForTimeout(1200);
+await page.locator('#content h1').first().waitFor({ state: 'visible', timeout: 10000 });
+await page.locator('#content span[style*="color"]').first()
+  .waitFor({ state: 'attached', timeout: 15000 });
 
 check('content visible', await page.locator('#content').isVisible());
 check('h1 rendered', (await page.locator('#content h1').count()) >= 1);
