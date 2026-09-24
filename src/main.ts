@@ -7,7 +7,7 @@ import './styles/app.css';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import {
   type DocEntry, type SearchHit,
-  pickFolder, readDocument, scanFolder, searchDocuments,
+  pickFolder, readDocument, scanFolder, searchDocuments, takePendingOpen,
 } from './lib/api';
 import { extractHeadings, initHighlighter, renderMarkdown, type Heading } from './lib/render';
 
@@ -131,6 +131,12 @@ async function openDoc(path: string): Promise<void> {
     enhance();
     crumb.textContent = doc ? doc.rel : path;
     crumb.title = path;
+    // Show which document is open. Tauri v2 does not mirror document.title to
+    // the OS window, so the title has to be set explicitly; this is also what
+    // makes a file-association launch visibly work.
+    const name = doc ? doc.name : path.split(/[/\\]/).pop() ?? path;
+    document.title = `${name} — Markdown Viewer`;
+    void setWindowTitle(document.title);
     scroll.scrollTop = 0;
     renderTree(state.docs);
   } catch (e) {
@@ -231,20 +237,86 @@ tree.addEventListener('click', (e) => {
 });
 
 /* ------------------------------- Toolbar -------------------------------- */
-$('#open-folder').addEventListener('click', async () => {
-  const picked = await pickFolder();
-  if (!picked) return;
-  state.root = picked;
-  crumb.textContent = picked;
-  crumb.title = picked;
+/** Load a folder as the workspace and list its documents. */
+async function openFolder(folder: string): Promise<void> {
+  state.root = folder;
+  crumb.textContent = folder;
+  crumb.title = folder;
   tree.innerHTML = '<p class="muted">Scanning…</p>';
   try {
-    state.docs = await scanFolder(picked);
+    state.docs = await scanFolder(folder);
     renderTree(state.docs);
   } catch (err) {
     tree.innerHTML = `<p class="error">${escapeHtml(String(err))}</p>`;
   }
+}
+
+$('#open-folder').addEventListener('click', async () => {
+  const picked = await pickFolder();
+  if (picked) await openFolder(picked);
 });
+
+/* --------------------- Opening a file from outside ---------------------- */
+// Two ways a document can arrive without the user browsing for it:
+//   * the app was launched with the path (file association, or `app.exe x.md`)
+//   * a file was dropped onto the window, or a second launch was forwarded
+//     by the single-instance plugin
+// Both end up here, and both adopt the file's folder as the workspace so the
+// sidebar stays usable rather than showing a single orphaned document.
+async function openExternalDocument(path: string, folder?: string | null): Promise<void> {
+  if (folder && folder !== state.root) {
+    await openFolder(folder);
+  } else if (!state.docs.length && state.root) {
+    // Already pointed at the right folder but the listing is empty; refresh so
+    // the opened document is highlighted in the tree.
+    state.docs = await scanFolder(state.root);
+    renderTree(state.docs);
+  }
+  await openDoc(path);
+}
+
+/** Wire the two external entry points once the webview is ready. */
+async function listenForExternalOpen(): Promise<void> {
+  // Drag and drop. With `dragDropEnabled` in the window config Tauri owns the
+  // drop and reports it as an event; the DOM never sees a `drop`.
+  const { getCurrentWebview } = await import('@tauri-apps/api/webview');
+  await getCurrentWebview().onDragDropEvent(async (event) => {
+    if (event.payload.type !== 'drop') return;
+    const paths = event.payload.paths ?? [];
+    const doc = paths.find((p) => /\.(md|markdown|mdown|mkd|mdx|txt)$/i.test(p));
+    if (doc) {
+      await openExternalDocument(doc, parentOf(doc));
+    }
+  });
+
+  // A later launch forwarded by the single-instance plugin.
+  const { listen } = await import('@tauri-apps/api/event');
+  await listen<{ path: string; folder: string | null }>('open-file', async (e) => {
+    await openExternalDocument(e.payload.path, e.payload.folder);
+  });
+
+  // A path given on the command line at first launch, stashed by the Rust side
+  // because setup runs before this listener exists.
+  const pending = await takePendingOpen();
+  if (pending) await openExternalDocument(pending, parentOf(pending));
+}
+
+/**
+ * Set the OS window title. Fails silently outside Tauri (the browser preview
+ * used by the tests), where `document.title` is all there is.
+ */
+async function setWindowTitle(title: string): Promise<void> {
+  try {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    await getCurrentWindow().setTitle(title);
+  } catch { /* not running under Tauri */ }
+}
+
+/** Directory portion of a path, handling both separators. */
+function parentOf(p: string): string | null {
+  const i = Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\'));
+  return i > 0 ? p.slice(0, i) : null;
+}
 
 /* ------------------------- Sidebar collapse ----------------------------- */
 // Hiding the whole sidebar (not just Contents) is what lets the reading pane
@@ -469,3 +541,11 @@ renderTree([]);
 renderToc();
 
 void initHighlighter().catch(() => { /* highlighting is best-effort */ });
+
+// External opens (association, drag-drop, second launch) are wired after the
+// shell exists so they can render into it.
+void listenForExternalOpen().catch((e) => {
+  // Not fatal: the viewer still works by browsing. But log it, because a
+  // silent failure here means association and drag-drop quietly do nothing.
+  console.error('[mdviewer] external open unavailable:', e);
+});

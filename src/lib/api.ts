@@ -38,3 +38,18 @@ export const searchDocuments = (
 
 export const pickFolder = (): Promise<string | null> =>
   invoke('pick_folder');
+
+/**
+ * A document named on the command line at startup (file association, or a path
+ * passed to the exe). Returned once: the Rust side takes rather than reads the
+ * value so a page reload does not reopen the same file.
+ */
+export const takePendingOpen = (): Promise<string | null> =>
+  invoke('take_pending_open');
+
+/** Payload of the `open-file` event, emitted on every launch after the first. */
+export interface OpenFileEvent {
+  path: string;
+  /** Parent directory, canonicalised, or null if it could not be resolved. */
+  folder: string | null;
+}

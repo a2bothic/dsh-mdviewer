@@ -37,6 +37,22 @@
     ],
     "category": "Productivity",
     "shortDescription": "Lightweight Markdown document viewer",
-    "longDescription": "Browse a folder of Markdown files and search their full text, rendered with a comfortable reading typography."
+    "longDescription": "Browse a folder of Markdown files and search their full text, rendered with a comfortable reading typography.",
+    "fileAssociations": [
+      {
+        "ext": ["md", "markdown", "mdown", "mkd", "mdx"],
+        "name": "Markdown Document",
+        "description": "Markdown document",
+        "role": "Viewer",
+        "mimeType": "text/markdown"
+      },
+      {
+        "ext": ["txt"],
+        "name": "Text Document",
+        "description": "Plain text document",
+        "role": "Viewer",
+        "mimeType": "text/plain"
+      }
+    ]
   }
 }

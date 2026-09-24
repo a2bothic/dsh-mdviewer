@@ -33,6 +33,9 @@ few megabytes rather than the ~100 MB an Electron build would need.
 - **Code highlighting, math, tables, task lists** — GitHub-flavoured Markdown
   through marked, Shiki (dual light/dark themes), and KaTeX.
 - **Reading controls** — column width, text size, and light/dark theme.
+- **Opens files from outside** — set it as the default handler for `.md`, or
+  drop a file onto the window. The document's folder becomes the workspace, so
+  the sidebar and search cover its neighbours.
 
 Preferences (theme, sidebar state, splitter position) persist in `localStorage`.
 

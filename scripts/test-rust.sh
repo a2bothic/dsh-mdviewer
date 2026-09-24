@@ -35,16 +35,64 @@ serde_json = "1"
 walkdir = "2"
 EOF
 
-# Strip the Tauri-only attribute, the pick_folder command (which needs
-# tauri::AppHandle) and the run() harness; keep everything else verbatim.
+# Strip anything that depends on the tauri crate, since this scratch crate has
+# no GUI dependencies. Items are matched by name (not by surrounding comments)
+# so the extraction cannot silently drift when the file is edited.
 python3 - "$SRC" "$SCRATCH/src/lib.rs" <<'PY'
-import re, sys, pathlib
-src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
-out = src.replace("#[tauri::command]\n", "")
-out = re.sub(r"/// Open a folder picker[\s\S]*?\n}\n", "", out)
-out = re.sub(r"#\[cfg_attr\(mobile[\s\S]*?\n\}\n", "", out)
-pathlib.Path(sys.argv[2]).write_text(out, encoding="utf-8")
-PY
+import sys, pathlib
 
+src = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+lines = src.split("\n")
+out, i = [], 0
+
+TAURI_FNS = {"pick_folder", "take_pending_open", "emit_open_file",
+             "document_from_args"}
+
+while i < len(lines):
+    line = lines[i]
+    stripped = line.strip()
+
+    # Drop the `use tauri...` imports.
+    if stripped.startswith("use tauri"):
+        i += 1
+        continue
+
+    # Drop the attribute that only exists with the tauri crate.
+    if stripped == "#[tauri::command]":
+        i += 1
+        continue
+
+    # Drop a tauri-dependent fn together with its doc comment / attributes.
+    if stripped.startswith(("fn ", "async fn ", "pub fn ", "pub async fn ")):
+        name = stripped.split("fn ", 1)[1].split("(")[0].strip()
+        if name in TAURI_FNS:
+            # Walk back over the attribute/doc lines already emitted.
+            while out and out[-1].strip().startswith(("///", "#[")):
+                out.pop()
+            depth = 0
+            while i < len(lines):
+                depth += lines[i].count("{") - lines[i].count("}")
+                i += 1
+                if depth == 0 and lines[i - 1].strip().endswith("}"):
+                    break
+            continue
+
+    # Drop the PendingOpen struct and everything from the mobile entry point on.
+    if stripped.startswith("struct PendingOpen") or stripped.startswith("#[cfg_attr(mobile"):
+        while out and out[-1].strip().startswith(("///", "#[")):
+            out.pop()
+        depth = 0
+        while i < len(lines):
+            depth += lines[i].count("{") - lines[i].count("}")
+            i += 1
+            if depth <= 0 and lines[i - 1].strip().endswith("}"):
+                break
+        continue
+
+    out.append(line)
+    i += 1
+
+pathlib.Path(sys.argv[2]).write_text("\n".join(out), encoding="utf-8")
+PY
 cd "$SCRATCH"
 cargo test --quiet 2>&1 | grep -vE '^\s*$' | tail -20

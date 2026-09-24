@@ -255,16 +255,91 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     Ok(picked.and_then(|p| p.into_path().ok()).and_then(|p| path_str(&p)))
 }
 
+/// The first command-line argument that names an existing document.
+///
+/// Windows launches an associated application as `app.exe "D:\dir\file.md"`,
+/// so argv carries the path. Flags are skipped so a future `--something` cannot
+/// be mistaken for a file, and the check is deliberately narrow: an argument is
+/// only accepted when it resolves to a file that exists.
+fn document_from_args<I: IntoIterator<Item = String>>(args: I) -> Option<String> {
+    args.into_iter()
+        .skip(1) // argv[0] is the executable itself
+        .find(|a| {
+            if a.starts_with('-') {
+                return false;
+            }
+            let p = Path::new(a);
+            p.is_file() && is_doc(p)
+        })
+        .and_then(|a| {
+            // Canonicalise so the front end receives one stable spelling of the
+            // path, and so its parent directory can be used as the workspace.
+            fs::canonicalize(&a)
+                .ok()
+                .and_then(|p| path_str(&p))
+                .or(Some(a))
+        })
+}
+
+/// Tell the front end to open a document, optionally establishing its folder
+/// as the workspace. Emitting an event (rather than calling into the webview
+/// directly) keeps the same path usable from startup and from a second launch.
+fn emit_open_file(app: &tauri::AppHandle, path: &str) {
+    use tauri::Emitter;
+    let folder = Path::new(path)
+        .parent()
+        .and_then(|p| fs::canonicalize(p).ok())
+        .and_then(|p| path_str(&p));
+    let _ = app.emit("open-file", serde_json::json!({
+        "path": path,
+        "folder": folder,
+    }));
+}
+
+/// A document named on the command line before the front end was listening.
+///
+/// Events emitted during `setup` would race the webview, so the path is held
+/// here and the front end takes it once it mounts. Taken (not read) so a
+/// reload does not reopen the same file unexpectedly.
+struct PendingOpen(std::sync::Mutex<Option<String>>);
+
+#[tauri::command]
+fn take_pending_open(state: tauri::State<'_, PendingOpen>) -> Option<String> {
+    state.0.lock().ok().and_then(|mut g| g.take())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
+            // A second launch (double-clicking another associated file while
+            // the app is open) is forwarded here instead of opening a new
+            // window.
+            if let Some(path) = document_from_args(argv) {
+                emit_open_file(app, &path);
+            }
+        }))
+        .setup(|app| {
+            // The file named on the command line at first launch. The front end
+            // may not be listening yet, so the path is also stashed for it to
+            // collect once it mounts.
+            if let Some(path) = document_from_args(std::env::args()) {
+                use tauri::Manager;
+                app.manage(PendingOpen(std::sync::Mutex::new(Some(path))));
+            } else {
+                use tauri::Manager;
+                app.manage(PendingOpen(std::sync::Mutex::new(None)));
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan_folder,
             read_document,
             search_documents,
-            pick_folder
+            pick_folder,
+            take_pending_open
         ])
         .run(tauri::generate_context!())
         .expect("error while running dsh-mdviewer");

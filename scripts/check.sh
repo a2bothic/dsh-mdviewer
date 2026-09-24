@@ -20,5 +20,8 @@ bash "$ROOT/scripts/test-rust.sh"
 echo "== browser visual check =="
 node "$ROOT/test/visual-check.mjs"
 
+echo "== external open (association / drag-drop / second launch) =="
+node "$ROOT/test/open-external.mjs"
+
 echo
 echo "all checks passed"

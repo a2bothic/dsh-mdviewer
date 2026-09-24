@@ -27,7 +27,8 @@
     "check": "bash scripts/check.sh",
     "test": "node test/visual-check.mjs",
     "test:rust": "cd src-tauri && cargo test",
-    "screenshots": "node test/capture-screenshots.mjs"
+    "screenshots": "node test/capture-screenshots.mjs",
+    "test:open": "node test/open-external.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.9.0",

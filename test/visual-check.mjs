@@ -55,6 +55,11 @@ page.on('pageerror', (e) => errors.push(String(e)));
 await page.addInitScript(({ doc }) => {
   // eslint-disable-next-line
   const invoke = async (cmd, args) => {
+    // The app registers an event listener for drag-drop and reads a stashed
+    // command-line path at boot; both must resolve or boot logs an error.
+    if (cmd === 'plugin:event|listen') return args?.handler ?? 1;
+    if (cmd === 'plugin:event|unlisten') return null;
+    if (cmd === 'take_pending_open') return null;
     if (cmd === 'pick_folder') return '/mock/docs';
     if (cmd === 'scan_folder') {
       return [
@@ -77,7 +82,22 @@ await page.addInitScript(({ doc }) => {
     }
     throw new Error('unmocked command: ' + cmd);
   };
-  window.__TAURI_INTERNALS__ = { invoke, transformCallback: (cb) => cb, metadata: {} };
+  // currentWebview/currentWindow labels are read by @tauri-apps/api when the
+  // app registers its drag-drop listener; without them that call throws.
+  window.__TAURI_INTERNALS__ = {
+    invoke,
+    transformCallback: (cb) => {
+      // Real Tauri returns a numeric id; the event plugin stores the callback
+      // under it and the backend echoes that id back on emit.
+      const id = Math.floor(Math.random() * 1e9);
+      (window.__cbs = window.__cbs || new Map()).set(id, cb);
+      return id;
+    },
+    metadata: {
+      currentWebview: { label: 'main' },
+      currentWindow: { label: 'main' },
+    },
+  };
   // plugin-opener resolves through the same bridge.
   window.__TAURI_INTERNALS__.plugins = {};
 }, { doc: md });
