@@ -75,7 +75,7 @@ Windows 可执行文件未做代码签名，首次运行可能触发 SmartScreen
 
 | | |
 |---|---|
-| Node.js | 20 或更高 |
+| Node.js | 20.19 或更高（推荐 24 LTS） |
 | pnpm | 9 或更高 |
 | Rust | stable，1.77+ |
 | Windows | WebView2 运行时（Windows 11 及较新的 Windows 10 已预装） |

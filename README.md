@@ -84,7 +84,7 @@ run: choose **More info** then **Run anyway**.
 
 | | |
 |---|---|
-| Node.js | 20 or newer |
+| Node.js | 20.19 or newer (24 LTS recommended) |
 | pnpm | 9 or newer |
 | Rust | stable, 1.77+ |
 | Windows | WebView2 runtime (preinstalled on Windows 11 and current Windows 10) |
