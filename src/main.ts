@@ -14,16 +14,44 @@ import { extractHeadings, initHighlighter, renderMarkdown, type Heading } from '
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
 
+/**
+ * One open document. Tabs hold a rendered snapshot rather than re-reading the
+ * file, so switching back to a tab is instant and keeps its scroll position.
+ * The outline is not stored: heading ids are derived from the heading text, so
+ * re-deriving them from the restored markup reproduces the same list.
+ */
+interface Tab {
+  path: string;
+  name: string;
+  rel: string;
+  /** Rendered, sanitised markup, captured when the tab was last shown. */
+  html: string;
+  /** Reading position, captured when the tab was last shown. */
+  scrollTop: number;
+}
+
 const state = {
   root: null as string | null,
   docs: [] as DocEntry[],
-  current: null as DocEntry | null,
+  /** Open documents, in strip order. Empty means the welcome screen. */
+  tabs: [] as Tab[],
+  /** Index into `state.tabs`, or -1 for the welcome screen. */
+  active: -1,
+  /** Most recently closed tabs, newest last, for reopening. */
+  closed: [] as Tab[],
+  /** True while the previous session's tabs are being re-opened. */
+  restoring: false,
   headings: [] as Heading[],
   view: 'files' as 'files' | 'search',
   sideOpen: true,
   outlineOpen: true,
   docsOpen: true,
 };
+
+/** The document in the active tab, when there is one. */
+function activeTab(): Tab | null {
+  return state.tabs[state.active] ?? null;
+}
 
 /* ------------------------------- Boot markup ---------------------------- */
 $('#app').innerHTML = `
@@ -39,6 +67,7 @@ $('#app').innerHTML = `
   <button id="font-btn" class="btn" title="Text size">M</button>
   <button id="theme-btn" class="btn" title="Light / dark">Dark</button>
 </div>
+<div id="tabs" role="tablist" aria-label="Open documents"></div>
 <div id="main">
   <aside id="side">
     <div id="toc-wrap">
@@ -73,6 +102,7 @@ const tree = $('#tree');
 const toc = $('#toc');
 const scroll = $('#scroll');
 const crumb = $('#crumb');
+const tabStrip = $('#tabs');
 const filter = $<HTMLInputElement>('#filter');
 
 /* ------------------------------- Utilities ------------------------------ */
@@ -108,7 +138,7 @@ function renderTree(docs: DocEntry[]): void {
   for (const [dir, items] of [...groups.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
     if (dir) html += `<div class="tree-dir">${escapeHtml(dir)}</div>`;
     for (const d of items) {
-      const active = state.current?.path === d.path ? ' active' : '';
+      const active = activeTab()?.path === d.path ? ' active' : '';
       html += `<button class="tree-item${active}" data-path="${escapeHtml(d.path)}" ` +
         `title="${escapeHtml(d.rel)}">` +
         `<span class="tree-name">${escapeHtml(d.name)}</span>` +
@@ -118,31 +148,315 @@ function renderTree(docs: DocEntry[]): void {
   tree.innerHTML = html;
 }
 
-async function openDoc(path: string): Promise<void> {
-  const doc = state.docs.find((d) => d.path === path);
-  try {
-    const text = await readDocument(path);
-    content.innerHTML = renderMarkdown(text);
+/** Refresh just the tree's active row, without rebuilding the list. */
+function markActiveInTree(): void {
+  const current = activeTab()?.path;
+  tree.querySelectorAll<HTMLElement>('.tree-item').forEach((el) => {
+    el.classList.toggle('active', el.dataset.path === current);
+  });
+}
+
+/* --------------------------------- Tabs --------------------------------- */
+// Opening a document adds a tab; it never replaces what is already on screen.
+// Clicking a file that is already open activates its existing tab instead of
+// opening a second copy, so the strip reads as a set of open documents rather
+// than as a history of clicks.
+
+/** How many closed tabs stay available to Ctrl+Shift+T. */
+const MAX_CLOSED_TABS = 12;
+
+/** Remember what the reading pane currently shows in the active tab. */
+function stashActiveTab(): void {
+  const tab = activeTab();
+  if (!tab) return;
+  tab.html = content.innerHTML;
+  tab.scrollTop = scroll.scrollTop;
+}
+
+function truncateClosed(): void {
+  if (state.closed.length > MAX_CLOSED_TABS) {
+    state.closed.splice(0, state.closed.length - MAX_CLOSED_TABS);
+  }
+}
+
+/** Point the reading pane at a tab index; -1 shows the welcome screen. */
+function activate(index: number): void {
+  if (index === state.active) {
+    // Nothing to switch to. The pane and the tab can still have drifted apart,
+    // because the reading pane is also addressable from outside this module;
+    // when they disagree the tab is the source of truth, so the snapshot is
+    // re-installed — never re-captured, which would keep whatever the pane
+    // was left holding.
+    if (activeTab() && activeTab()!.html !== content.innerHTML) showActiveTab();
+    else { renderTabs(); markActiveInTree(); keepActiveTabVisible(); }
+    return;
+  }
+  stashActiveTab();
+  state.active = index;
+  showActiveTab();
+}
+
+/** Install the active tab (or the welcome screen) into the reading pane. */
+function showActiveTab(): void {
+  const tab = activeTab();
+  if (tab) {
+    content.innerHTML = tab.html;
     content.hidden = false;
     $('#welcome').hidden = true;
-    state.current = doc ?? null;
+    // Heading ids are derived from the heading text, so re-running this on the
+    // restored markup reproduces the same ids the outline links to.
     state.headings = extractHeadings(content);
-    renderToc();
     enhance();
-    crumb.textContent = doc ? doc.rel : path;
-    crumb.title = path;
-    // Show which document is open. Tauri v2 does not mirror document.title to
-    // the OS window, so the title has to be set explicitly; this is also what
-    // makes a file-association launch visibly work.
-    const name = doc ? doc.name : path.split(/[/\\]/).pop() ?? path;
-    document.title = `${name} — Markdown Viewer`;
-    void setWindowTitle(document.title);
-    scroll.scrollTop = 0;
-    renderTree(state.docs);
-  } catch (e) {
-    content.hidden = false;
-    content.innerHTML = `<p class="error">${escapeHtml(String(e))}</p>`;
+    crumb.textContent = tab.rel;
+    crumb.title = tab.path;
+    scroll.scrollTop = tab.scrollTop;
+  } else {
+    content.innerHTML = '';
+    content.hidden = true;
+    $('#welcome').hidden = false;
+    state.headings = [];
+    crumb.textContent = state.root ?? 'No folder opened';
+    crumb.title = state.root ?? '';
   }
+
+  // Show which document is open. Tauri v2 does not mirror document.title to
+  // the OS window, so the title has to be set explicitly; this is also what
+  // makes a file-association launch visibly work.
+  const name = tab ? tab.name : '';
+  document.title = name ? `${name} — Markdown Viewer` : 'Markdown Viewer';
+  void setWindowTitle(document.title);
+
+  renderToc();
+  renderTabs();
+  markActiveInTree();
+  keepActiveTabVisible();
+  // Not while restoring: the session is written once, at the end, so a partly
+  // rebuilt strip is never what gets remembered.
+  if (!state.restoring) saveTabs();
+}
+
+/**
+ * Open a document in a tab. An already-open path is activated rather than
+ * duplicated, which is what makes the tree, search hits, and external opens
+ * feel like one document set.
+ */
+async function openDoc(path: string, revealLine?: number): Promise<void> {
+  const doc = state.docs.find((d) => d.path === path);
+  const existing = state.tabs.findIndex((t) => t.path === path);
+  if (existing !== -1) {
+    activate(existing);
+    if (revealLine !== undefined) void scrollToLine(path, revealLine);
+    return;
+  }
+
+  let html: string;
+  try {
+    html = renderMarkdown(await readDocument(path));
+  } catch (e) {
+    // A failed read is still a tab, so the strip keeps matching reality and
+    // the error is attributable to a file rather than replacing the reader.
+    html = `<p class="error">${escapeHtml(String(e))}</p>`;
+  }
+
+  // The new tab goes next to the active one, which keeps a group of related
+  // documents together when moving between them.
+  const at = state.active === -1 ? state.tabs.length : state.active + 1;
+  state.closed = [];
+  const tab: Tab = {
+    path,
+    name: doc?.name ?? path.split(/[/\\]/).pop() ?? path,
+    rel: doc?.rel ?? path,
+    html,
+    scrollTop: 0,
+  };
+  state.tabs.splice(at, 0, tab);
+  activate(at);
+  if (revealLine !== undefined) void scrollToLine(path, revealLine);
+}
+
+/** Close a tab, falling back to its neighbour and never to nothing. */
+function closeTab(index: number): void {
+  const tab = state.tabs[index];
+  if (!tab) return;
+
+  const wasActive = index === state.active;
+  state.tabs.splice(index, 1);
+  state.closed.push(tab);
+  truncateClosed();
+
+  if (!state.tabs.length) {
+    // The strip is empty, so the reading pane goes back to the welcome screen.
+    state.active = -1;
+    showActiveTab();
+  } else if (wasActive) {
+    // The tab that slid into this slot is the natural next document; at the
+    // end of the strip that is the previous one.
+    state.active = Math.min(index, state.tabs.length - 1);
+    showActiveTab();
+  } else {
+    // Removal shifted the indices; follow the open tab.
+    if (state.active > index) state.active -= 1;
+    renderTabs();
+    markActiveInTree();
+    saveTabs();
+  }
+}
+
+/** Bring back the most recently closed tab, in its old strip position. */
+function reopenClosedTab(): void {
+  const tab = state.closed.pop();
+  if (!tab) return;
+  const at = Math.min(Math.max(state.active, 0), state.tabs.length);
+  state.tabs.splice(at, 0, tab);
+  activate(at);
+}
+
+function renderTabs(): void {
+  // A single tab is still worth showing: it names the document and carries the
+  // close button, and it is the only way to see that more than one can be open.
+  tabStrip.hidden = state.tabs.length === 0;
+
+  tabStrip.innerHTML = state.tabs.map((t, i) => {
+    const on = i === state.active;
+    return `<div class="tab${on ? ' active' : ''}" role="tab" data-index="${i}" ` +
+      `tabindex="${on ? 0 : -1}" aria-selected="${on}" title="${escapeHtml(t.path)}">` +
+      `<span class="tab-name">${escapeHtml(t.name)}</span>` +
+      `<button class="tab-close" type="button" data-close="${i}" ` +
+      `title="Close ${escapeHtml(t.name)} (Ctrl+W)" ` +
+      `aria-label="Close ${escapeHtml(t.name)}">&times;</button></div>`;
+  }).join('');
+}
+
+/** Keep the active tab inside the visible part of a scrolled strip. */
+function keepActiveTabVisible(): void {
+  const el = tabStrip.querySelector<HTMLElement>('.tab.active');
+  if (!el) return;
+  const box = el.getBoundingClientRect();
+  const strip = tabStrip.getBoundingClientRect();
+  if (box.left < strip.left) tabStrip.scrollLeft -= strip.left - box.left;
+  else if (box.right > strip.right) tabStrip.scrollLeft += box.right - strip.right;
+}
+
+/* --------------------------- Tab session -------------------------------- */
+// Like the theme and the sidebar, the set of open documents survives a restart:
+// reopening the viewer should return you to what you were reading. Only the
+// paths are stored — the bodies are re-read, so a tab never shows stale text.
+
+const TABS_KEY = 'mdviewer.tabs';
+
+function saveTabs(): void {
+  try {
+    localStorage.setItem(TABS_KEY, JSON.stringify({
+      paths: state.tabs.map((t) => t.path),
+      active: state.active,
+    }));
+  } catch { /* storage full or unavailable: the session is not worth failing over */ }
+}
+
+/**
+ * Restore the previous session. Each path is re-opened in order; the active
+ * index is only moved once they all exist, so a tab that has since been
+ * deleted cannot leave the strip pointing at the wrong document.
+ */
+async function restoreTabs(folder: string): Promise<void> {
+  let saved: { paths?: string[]; active?: number };
+  try {
+    saved = JSON.parse(localStorage.getItem(TABS_KEY) ?? '{}');
+  } catch { return; }
+
+  const paths = (saved.paths ?? []).filter((p) => typeof p === 'string');
+  if (!paths.length) return;
+  state.restoring = true;
+  try {
+    for (const path of paths) {
+      try {
+        await openDoc(path);
+      } catch { /* a path that no longer exists is simply skipped */ }
+    }
+  } finally {
+    state.restoring = false;
+  }
+  const at = typeof saved.active === 'number' ? saved.active : -1;
+  if (at >= 0 && at < state.tabs.length) activate(at);
+  saveTabs();
+}
+
+/* Mousedown, not click: activating on press is what every tabbed app does,
+   and it keeps the close button from being swallowed by a drag. Nothing is
+   cancelled here beyond the default that press would start. */
+tabStrip.addEventListener('mousedown', (e) => {
+  const target = e.target as HTMLElement;
+  const close = target.closest<HTMLElement>('[data-close]');
+  if (close) {
+    e.preventDefault();
+    closeTab(Number(close.dataset.close));
+    return;
+  }
+  const tab = target.closest<HTMLElement>('.tab');
+  if (tab) {
+    e.preventDefault();
+    activate(Number(tab.dataset.index));
+  }
+});
+
+// The activation already happened on mousedown, so the click that follows must
+// not do anything else. It is not cancelled: the strip is a scrolling element,
+// and swallowing the click would also swallow the middle-button gestures.
+tabStrip.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('.tab')) e.preventDefault();
+});
+
+/** Middle-click closes a tab, as it does in a browser. */
+tabStrip.addEventListener('auxclick', (e) => {
+  if (e.button !== 1) return;
+  const tab = (e.target as HTMLElement).closest<HTMLElement>('.tab');
+  if (tab) {
+    e.preventDefault();
+    closeTab(Number(tab.dataset.index));
+  }
+});
+
+/** Left/right arrows move between tabs, as in the ARIA tabs pattern. */
+tabStrip.addEventListener('keydown', (e) => {
+  if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+  if (!state.tabs.length) return;
+  e.preventDefault();
+  const step = e.key === 'ArrowLeft' ? -1 : 1;
+  const next = (state.active + step + state.tabs.length) % state.tabs.length;
+  activate(next);
+  tabStrip.querySelector<HTMLElement>('.tab.active')?.focus();
+});
+
+/**
+ * Scroll to the source of a search hit. Rendering does not preserve source
+ * lines, so the number of source lines that precede the hit is scaled onto the
+ * rendered blocks: both are proportional to how far into the document the hit
+ * sits. The target is outlined briefly so the jump is visible even when the
+ * reader is already looking at that part of the page.
+ */
+async function scrollToLine(path: string, line: number): Promise<void> {
+  const totalLines = await countLines(path);
+  const blocks = [...content.children] as HTMLElement[];
+  if (!blocks.length) return;
+  const share = totalLines > 1 ? (line - 1) / (totalLines - 1) : 0;
+  const block = blocks[Math.min(blocks.length - 1, Math.max(0, Math.round(share * (blocks.length - 1))))]!;
+  block.scrollIntoView({ block: 'start' });
+  block.classList.add('hit-flash');
+  setTimeout(() => block.classList.remove('hit-flash'), 1400);
+}
+
+/** Source line count, needed to place a hit; cached per path. */
+const lineCounts = new Map<string, number>();
+
+async function countLines(path: string): Promise<number> {
+  const cached = lineCounts.get(path);
+  if (cached !== undefined) return cached;
+  let n = 1;
+  try {
+    n = (await readDocument(path)).split('\n').length;
+  } catch { /* unreadable: fall back to a single line */ }
+  lineCounts.set(path, n);
+  return n;
 }
 
 /** Wire copy buttons and external links inside freshly rendered content. */
@@ -229,25 +543,33 @@ filter.addEventListener('input', () => {
   searchTimer = window.setTimeout(() => { void runSearch(filter.value); }, 180);
 });
 
-/* ------------------------------ Tree clicks ----------------------------- */
+/* --------------------- Tree clicks and search hits ---------------------- */
+// One handler for both: the sidebar renders either the document list or the
+// search results, and each row carries the path it opens. A search row also
+// carries the source line to jump to.
 tree.addEventListener('click', (e) => {
   const el = (e.target as HTMLElement).closest<HTMLElement>('[data-path]');
   if (!el) return;
-  void openDoc(el.dataset.path!);
+  const line = el.dataset.line ? Number(el.dataset.line) : undefined;
+  void openDoc(el.dataset.path!, line);
 });
 
 /* ------------------------------- Toolbar -------------------------------- */
 /** Load a folder as the workspace and list its documents. */
 async function openFolder(folder: string): Promise<void> {
   state.root = folder;
-  crumb.textContent = folder;
-  crumb.title = folder;
+  try { localStorage.setItem('mdviewer.root', folder); } catch { /* ignore */ }
   tree.innerHTML = '<p class="muted">Scanning…</p>';
   try {
     state.docs = await scanFolder(folder);
     renderTree(state.docs);
   } catch (err) {
     tree.innerHTML = `<p class="error">${escapeHtml(String(err))}</p>`;
+  }
+  // The breadcrumb shows the active document; with no tabs it shows the folder.
+  if (!activeTab()) {
+    crumb.textContent = folder;
+    crumb.title = folder;
   }
 }
 
@@ -338,13 +660,26 @@ function setSidebarOpen(open: boolean, persist = true): void {
 
 $('#toggle-side').addEventListener('click', () => setSidebarOpen(!state.sideOpen));
 
-// Ctrl/Cmd+B is the conventional shortcut for this panel.
+// Ctrl/Cmd+B is the conventional shortcut for this panel. The tab shortcuts
+// (Ctrl+W, Ctrl+Tab, Ctrl+Shift+T) are the browser ones, since the strip is
+// meant to read like a browser's.
 window.addEventListener('keydown', (e: KeyboardEvent) => {
   if (!(e.ctrlKey || e.metaKey)) return;
   const k = e.key.toLowerCase();
   if (k === 'b') {
     e.preventDefault();
     setSidebarOpen(!state.sideOpen);
+  } else if (k === 'w') {
+    e.preventDefault();
+    if (state.active !== -1) closeTab(state.active);
+  } else if (k === 't' && e.shiftKey) {
+    e.preventDefault();
+    reopenClosedTab();
+  } else if (e.key === 'Tab' && state.tabs.length > 1) {
+    // Ctrl+Tab / Ctrl+Shift+Tab cycle the strip, wrapping at both ends.
+    e.preventDefault();
+    const step = e.shiftKey ? -1 : 1;
+    activate((state.active + step + state.tabs.length) % state.tabs.length);
   } else if (k === 'd') {
     e.preventDefault();
     setDocsVisible(!state.docsOpen);
@@ -539,12 +874,32 @@ requestAnimationFrame(clampSplit);
 
 renderTree([]);
 renderToc();
+renderTabs();
 
 void initHighlighter().catch(() => { /* highlighting is best-effort */ });
 
+// Bring back the documents that were open last time, then let an external open
+// (a file association or a drag-drop at launch) take precedence over them. The
+// saved workspace folder is what makes the restored tabs meaningful in the
+// sidebar; without it the tabs still open, just unlisted.
+//
+// Both run in one chain because they touch the same strip: restoring after an
+// external open would re-activate a stale tab, and running them concurrently
+// would interleave their inserts.
+async function bootSession(carryOn: () => Promise<void>): Promise<void> {
+  try {
+    const folder = localStorage.getItem('mdviewer.root');
+    if (folder) await openFolder(folder);
+    await restoreTabs(folder ?? '');
+  } catch (e) {
+    console.error('[mdviewer] session restore failed:', e);
+  }
+  await carryOn();
+}
+
 // External opens (association, drag-drop, second launch) are wired after the
 // shell exists so they can render into it.
-void listenForExternalOpen().catch((e) => {
+void bootSession(() => listenForExternalOpen()).catch((e) => {
   // Not fatal: the viewer still works by browsing. But log it, because a
   // silent failure here means association and drag-drop quietly do nothing.
   console.error('[mdviewer] external open unavailable:', e);

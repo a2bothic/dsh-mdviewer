@@ -17,6 +17,11 @@ few megabytes rather than the ~100 MB an Electron build would need.
 
 - **Folder browsing** — open a folder; every `.md`, `.markdown`, `.mdx`, `.txt`
   under it appears in the sidebar, grouped by directory.
+- **Tabs** — every document you open gets its own tab instead of replacing the
+  one you were reading, so you can keep several open and switch between them.
+  The tab remembers its scroll position and outline; `Ctrl+W` closes one,
+  `Ctrl+Tab` cycles, `Ctrl+Shift+T` reopens the last closed, and a middle-click
+  closes a tab. A long strip scrolls sideways.
 - **Full-text search** — one box searches the whole folder. Results show the
   file, line number, and the matching line with the hit highlighted.
 - **Reading typography** — the column, rhythm, and font stack are ported from
@@ -37,12 +42,18 @@ few megabytes rather than the ~100 MB an Electron build would need.
   drop a file onto the window. The document's folder becomes the workspace, so
   the sidebar and search cover its neighbours.
 
-Preferences (theme, sidebar state, splitter position) persist in `localStorage`.
+Preferences (theme, sidebar state, splitter position, and the open tabs with the
+active one) persist in `localStorage`.
 
 Deliberately **not** included: editing, note graphs, sync, plugins, an agent,
 or a terminal. This is a viewer.
 
 ## In pictures
+
+**Tabs** — every document gets its own tab, so you can keep several open and
+switch between them without losing your place in any of them.
+
+![Open documents shown as tabs](docs/images/screenshot-tabs.png)
 
 **Full-text search** — results carry the file, line number, and a highlighted
 excerpt; click one to open it.
@@ -172,7 +183,7 @@ width; the derived rhythm recalculates automatically.
 
 ```
 src/
-  main.ts              application shell, sidebar, toolbar, search UI
+  main.ts              application shell, tab strip, sidebar, toolbar, search UI
   lib/api.ts           typed wrappers over the Rust commands
   lib/render.ts        Markdown pipeline (marked + Shiki + KaTeX + DOMPurify)
   styles/tokens.css    design tokens (fonts, colours, rhythm)
@@ -181,6 +192,10 @@ src/
 src-tauri/
   src/lib.rs           scan_folder / read_document / search_documents / pick_folder
 ```
+
+Tabs hold a rendered snapshot of their document rather than re-reading the file,
+so switching is instant and each tab keeps its own scroll position and outline.
+Opening a path that is already open activates its tab instead of adding a copy.
 
 All filesystem access lives in Rust, so the webview never touches the disk
 directly and the CSP can stay strict. There is no IPC surface for writing.

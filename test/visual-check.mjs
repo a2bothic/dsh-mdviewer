@@ -125,12 +125,21 @@ const treeCount = await page.locator('.tree-item').count();
 check('file tree populated', treeCount === 3, `${treeCount} items`);
 check('tree groups by dir', (await page.locator('.tree-dir').count()) === 1);
 
+// --- tabs: opening must add a tab, never replace the current one ----------
+check('no tab strip before a document is open', (await page.locator('.tab').count()) === 0);
+
 // Open a document, then wait for the async highlighter to colour a token
 // rather than sleeping a fixed amount.
 await page.click('.tree-item >> nth=0');
 await page.locator('#content h1').first().waitFor({ state: 'visible', timeout: 10000 });
 await page.locator('#content span[style*="color"]').first()
   .waitFor({ state: 'attached', timeout: 15000 });
+
+const firstTitle = await page.locator('.tab.active .tab-name').textContent();
+check('opening a document creates one tab', (await page.locator('.tab').count()) === 1,
+  `${await page.locator('.tab').count()} tabs`);
+check('the new tab is active',
+  (await page.locator('.tab.active').getAttribute('aria-selected')) === 'true');
 
 check('content visible', await page.locator('#content').isVisible());
 check('h1 rendered', (await page.locator('#content h1').count()) >= 1);
@@ -211,6 +220,129 @@ await page.fill('#filter', '');
 await page.waitForTimeout(500);
 check('clearing search restores tree', (await page.locator('.tree-item').count()) === 3);
 
+// --- tabs: several documents open side by side ---------------------------
+// The strip is the point of this section: opening a second document must not
+// overwrite the first, and each tab must restore its own document.
+await page.locator('.tree-item').nth(1).click();
+await page.waitForTimeout(700);
+check('opening a second document adds a tab',
+  (await page.locator('.tab').count()) === 2, `${await page.locator('.tab').count()} tabs`);
+const secondTitle = await page.locator('.tab.active .tab-name').textContent();
+check('the second document is now active', secondTitle !== firstTitle,
+  `${firstTitle} -> ${secondTitle}`);
+
+// Switching back must show the FIRST document again, not an empty pane.
+await page.locator('.tab').first().click();
+await page.waitForTimeout(500);
+check('clicking the first tab activates it', await page.locator('.tab').first()
+  .evaluate((el) => el.classList.contains('active')));
+check('the first tab still holds its document',
+  (await page.locator('.tab.active .tab-name').textContent()) === firstTitle,
+  `${firstTitle}`);
+check('switching back restores the rendered document',
+  (await page.locator('#content h1').count()) >= 1 &&
+    (await page.locator('#content').isVisible()),
+  `${await page.locator('#content h1').count()} headings`);
+check('the outline follows the active tab',
+  (await page.locator('#toc a').count()) ===
+    (await page.locator('#content h1, #content h2, #content h3, #content h4').count()));
+
+// Re-opening a document that is already open must reuse its tab, not add one.
+await page.locator('.tree-item').nth(1).click();
+await page.waitForTimeout(500);
+check('re-opening an open document reuses its tab',
+  (await page.locator('.tab').count()) === 2, `${await page.locator('.tab').count()} tabs`);
+
+// A search hit opens the hit's document.
+await page.fill('#filter', 'typography');
+await page.waitForTimeout(600);
+await page.locator('.hit').first().click();
+await page.waitForTimeout(600);
+check('a search hit opens its document',
+  (await page.locator('#content h1').count()) >= 1);
+
+// Closing the active tab falls back to its neighbour rather than nothing.
+await page.locator('.tab').first().click();
+await page.waitForTimeout(400);
+await page.locator('.tab.active .tab-close').click();
+await page.waitForTimeout(500);
+check('closing a tab removes it',
+  await page.evaluate(() => document.querySelectorAll('.tab').length < 2));
+check('the reading pane survives a close',
+  (await page.locator('#content h1').count()) >= 1);
+
+// Ctrl+Shift+T brings the closed tab back.
+const beforeReopen = await page.locator('.tab').count();
+await page.keyboard.press('Control+Shift+t');
+await page.waitForTimeout(500);
+check('Ctrl+Shift+T reopens the closed tab',
+  (await page.locator('.tab').count()) === beforeReopen + 1,
+  `${beforeReopen} -> ${await page.locator('.tab').count()}`);
+
+// Middle-click closes, as in a browser. Chromium does not synthesise an
+// `auxclick` for a real middle press under the headless mode this suite runs
+// in, so the event is dispatched explicitly: that still exercises the app's own
+// listener and close path rather than a stand-in for it.
+const beforeMiddle = await page.locator('.tab').count();
+await page.evaluate(() => {
+  document.querySelector('.tab')
+    .dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+});
+await page.waitForTimeout(500);
+check('middle-click closes a tab',
+  (await page.locator('.tab').count()) === beforeMiddle - 1,
+  `${beforeMiddle} -> ${await page.locator('.tab').count()}`);
+
+// Closing the last tab returns to the welcome screen rather than a blank pane.
+// The close buttons act on press, so drive them with a real click.
+for (let guard = 0; guard < 10; guard++) {
+  const remaining = await page.locator('.tab').count();
+  if (remaining === 0) break;
+  await page.locator('.tab').first().locator('.tab-close').click();
+  await page.waitForTimeout(300);
+}
+await page.waitForTimeout(400);
+check('closing every tab returns to the welcome screen',
+  (await page.locator('.tab').count()) === 0 && (await page.locator('#welcome').isVisible()),
+  `${await page.locator('.tab').count()} tabs`);
+
+// Re-open one document so the rest of the suite runs against a normal state.
+// Clear the search box first: the sidebar is showing hits, not the file list.
+await page.fill('#filter', '');
+await page.waitForTimeout(500);
+await page.locator('.tree-item').first().click();
+await page.locator('#content h1').first().waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(400);
+check('reopening after the strip emptied works',
+  (await page.locator('.tab').count()) === 1 &&
+    (await page.locator('#content').isVisible()));
+
+// --- tabs: the session survives a restart --------------------------------
+// Open a second document and select the first, then reload: the same tabs must
+// come back, with the same one active.
+await page.locator('.tree-item').nth(1).click();
+await page.waitForTimeout(600);
+await page.locator('.tab').first().click();
+await page.waitForTimeout(400);
+const sessionBefore = await page.evaluate(() => ({
+  count: document.querySelectorAll('.tab').length,
+  active: document.querySelector('.tab.active .tab-name')?.textContent,
+}));
+await page.reload({ waitUntil: 'load' });
+await page.waitForTimeout(2500);
+const sessionAfter = await page.evaluate(() => ({
+  count: document.querySelectorAll('.tab').length,
+  active: document.querySelector('.tab.active .tab-name')?.textContent,
+  hasContent: (document.querySelector('#content h1')?.textContent ?? '').length > 0,
+}));
+check('open tabs survive a reload',
+  sessionAfter.count === sessionBefore.count, 
+  `${sessionBefore.count} -> ${sessionAfter.count}`);
+check('the active tab survives a reload',
+  sessionAfter.active === sessionBefore.active,
+  `${sessionBefore.active} -> ${sessionAfter.active}`);
+check('the restored tab renders its document', sessionAfter.hasContent);
+
 // Dark theme (state was cleared at the start, so this always starts light).
 await page.click('#theme-btn');
 await page.waitForTimeout(500);
@@ -286,7 +418,10 @@ await page.evaluate(() => {
     return original(cmd, args);
   };
 });
-await page.locator('.tree-item').first().click();
+// Open a document that is not already in a tab. Re-opening a document that is
+// already open is deliberately a no-op, so clicking the current one would never
+// pick up the mock installed above.
+await page.locator('.tree-item').nth(2).click();
 await page.waitForTimeout(1000);
 const headings = await page.locator('#toc a').count();
 check('long outline is loaded for the overflow check', headings >= 40, `${headings} entries`);
