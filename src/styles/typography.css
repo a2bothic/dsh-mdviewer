@@ -197,9 +197,58 @@
 /* Give room for the language label above the first code line. */
 .markdown .code-block:has(.code-lang) pre { padding-top: 28px; }
 
-/* Shiki dual themes */
+/* --- Whole-file source view --------------------------------------------- */
+/* A non-Markdown document is one code block standing in for the article, so it
+   gets the full column height instead of a block's margins.
+
+   Long lines WRAP rather than producing a horizontal scrollbar: a script read
+   as a document should fit the reading column the same way prose does, and a
+   sideways scrollbar on the whole pane is the opposite of comfortable reading.
+   Wrapped continuation lines are indented so they stay visibly distinct from
+   real lines. Set --source-wrap to `pre` to get the old scrolling behaviour. */
+.markdown .code-block.source-view {
+  margin: 0;
+  min-height: calc(100vh - 160px);
+}
+.markdown .code-block.source-view pre {
+  overflow-x: auto;
+  white-space: var(--source-wrap, pre-wrap);
+  overflow-wrap: anywhere;
+  tab-size: 4;
+}
+/* Keep the hanging indent that makes a wrapped line readable: the second and
+   later visual lines of a logical line start further in. `text-indent` cannot
+   do this per line, so it is applied as a negative first-line indent on each
+   line span, with the matching space reserved on the code element.
+   Each span is its own block and `renderCode` emits no newlines between them,
+   so a blank line occupies exactly one line instead of two. */
+.markdown .code-block.source-view pre > code {
+  display: block;
+  padding-left: 2ch;
+}
+.markdown .code-block.source-view pre > code > span.line {
+  display: block;
+  text-indent: -2ch;
+}
+/* Shiki emits a trailing empty line when the file ends with a newline; the
+   line is a real element, so it must be hidden rather than matched as `pre:empty`. */
+.markdown .code-block.source-view pre > code > span.line:last-child:empty {
+  display: none;
+}
+/* An empty source line must still occupy a line. A block with no content has
+   zero height, so `min-height` restores the rhythm the file actually has. */
+.markdown .code-block.source-view pre > code > span.line:empty {
+  min-height: 1lh;
+}
+
+/* Shiki dual themes.
+   The fenced-code path keeps Shiki's `.shiki` wrapper; the whole-file source
+   view strips it (see renderCode), so these must not be scoped to `.shiki`
+   alone — otherwise the dark theme would leave light-theme inline colours in
+   place, and the tokens that are dark-on-light would come out unreadable. */
 .theme-dark .shiki,
-.theme-dark .shiki span {
+.theme-dark .shiki span,
+.theme-dark .code-block.source-view code span {
   color: var(--shiki-dark) !important;
   background-color: transparent !important;
 }

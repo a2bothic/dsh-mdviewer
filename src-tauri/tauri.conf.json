@@ -36,8 +36,14 @@
       "icons/icon.ico"
     ],
     "category": "Productivity",
-    "shortDescription": "Lightweight Markdown document viewer",
-    "longDescription": "Browse a folder of Markdown files and search their full text, rendered with a comfortable reading typography.",
+    "shortDescription": "Lightweight document viewer",
+    "longDescription": "Browse a folder of documents and search their full text, rendered with a comfortable reading typography. Markdown is read as prose; scripts, source, and config files are read as highlighted source.",
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser",
+        "installerHooks": "nsis/hooks.nsh"
+      }
+    },
     "fileAssociations": [
       {
         "ext": ["md", "markdown", "mdown", "mkd", "mdx"],
@@ -47,9 +53,39 @@
         "mimeType": "text/markdown"
       },
       {
-        "ext": ["txt"],
+        "ext": ["txt", "text", "log", "rst", "adoc", "csv", "tsv"],
         "name": "Text Document",
         "description": "Plain text document",
+        "role": "Viewer",
+        "mimeType": "text/plain"
+      },
+      {
+        "ext": ["sh", "bash", "zsh", "fish", "ps1", "bat", "cmd", "nu"],
+        "name": "Shell Script",
+        "description": "Shell script",
+        "role": "Viewer",
+        "mimeType": "text/plain"
+      },
+      {
+        "ext": [
+          "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "py", "rb",
+          "php", "pl", "lua", "r", "rs", "go", "java", "kt", "scala", "swift",
+          "cs", "c", "h", "cc", "cpp", "hpp", "dart", "ex", "erl", "hs", "clj",
+          "groovy", "jl", "sql"
+        ],
+        "name": "Source File",
+        "description": "Source code file",
+        "role": "Viewer",
+        "mimeType": "text/plain"
+      },
+      {
+        "ext": [
+          "html", "htm", "css", "scss", "sass", "less", "xml", "svg", "json",
+          "jsonc", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
+          "env", "diff", "patch", "tex", "vue", "svelte", "astro"
+        ],
+        "name": "Config or Markup File",
+        "description": "Configuration or markup file",
         "role": "Viewer",
         "mimeType": "text/plain"
       }

@@ -11,7 +11,30 @@ use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 /// Extensions treated as readable documents.
-const DOC_EXTENSIONS: &[&str] = &["md", "markdown", "mdown", "mkd", "mdx", "txt"];
+///
+/// Beyond Markdown, this deliberately covers the plain-text and source files a
+/// developer keeps next to their documentation — shell scripts, config files,
+/// and the common languages — so a folder of them browses and searches like a
+/// folder of Markdown. Each one is shown as a highlighted code block rather
+/// than parsed as Markdown; see `FILE_LANGUAGES` for that mapping.
+const DOC_EXTENSIONS: &[&str] = &[
+    // Markdown and plain prose.
+    "md", "markdown", "mdown", "mkd", "mdx", "txt", "text", "rst", "adoc", "org",
+    "log", "csv", "tsv",
+    // Shell and scripting.
+    "sh", "bash", "zsh", "fish", "ksh", "ps1", "psm1", "bat", "cmd", "nu",
+    // Programming languages.
+    "js", "mjs", "cjs", "jsx", "ts", "mts", "cts", "tsx", "py", "pyw", "rb",
+    "php", "pl", "pm", "lua", "r", "rs", "go", "java", "kt", "kts", "scala",
+    "swift", "cs", "vb", "c", "h", "cc", "cpp", "cxx", "hpp", "hh", "hxx", "m",
+    "mm", "dart", "ex", "exs", "erl", "hs", "clj", "cljs", "groovy", "jl", "sql",
+    "vue", "svelte", "astro",
+    // Markup, data, and configuration.
+    "html", "htm", "xhtml", "css", "scss", "sass", "less", "xml", "svg", "json",
+    "jsonc", "json5", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
+    "env", "lock", "gradle", "mk", "makefile", "dockerfile", "gitignore",
+    "editorconfig", "diff", "patch", "tex",
+];
 
 /// Directories that are never worth scanning.
 const SKIP_DIRS: &[&str] = &[
@@ -247,7 +270,7 @@ async fn pick_folder(app: tauri::AppHandle) -> Result<Option<String>, String> {
     let (tx, rx) = std::sync::mpsc::channel();
     app.dialog()
         .file()
-        .set_title("Choose a folder of Markdown documents")
+        .set_title("Choose a folder of documents")
         .pick_folder(move |p| {
             let _ = tx.send(p);
         });
@@ -368,19 +391,41 @@ mod tests {
         fs::create_dir_all(root.join("node_modules")).unwrap();
         fs::write(root.join("node_modules/e.md"), "# e").unwrap();
 
+        // Source and script files that sit beside documentation are documents
+        // too; a binary is not.
+        fs::write(root.join("run.sh"), "#!/bin/sh\necho hi\n").unwrap();
+        fs::write(root.join("app.py"), "print('hi')\n").unwrap();
+        fs::write(root.join("conf.yml"), "a: 1\n").unwrap();
+        fs::write(root.join("blob.bin"), "binary").unwrap();
+
         let got = scan_folder(root.to_str().unwrap().to_string()).unwrap();
         let names: Vec<_> = got.iter().map(|d| d.name.as_str()).collect();
 
         assert!(names.contains(&"a.md"), "md file missing: {names:?}");
         assert!(names.contains(&"b.txt"), "txt file missing: {names:?}");
         assert!(names.contains(&"d.markdown"), "nested file missing: {names:?}");
+        assert!(names.contains(&"run.sh"), "shell script missing: {names:?}");
+        assert!(names.contains(&"app.py"), "python file missing: {names:?}");
+        assert!(names.contains(&"conf.yml"), "yaml file missing: {names:?}");
         assert!(!names.contains(&"c.png"), "png should be excluded");
+        assert!(!names.contains(&"blob.bin"), "binary should be excluded");
         assert!(!names.contains(&"e.md"), "node_modules should be skipped");
 
         // Relative paths and directory grouping must be populated.
         let d = got.iter().find(|d| d.name == "d.markdown").unwrap();
         assert_eq!(d.dir, "sub");
         assert_eq!(d.rel.replace('\\', "/"), "sub/d.markdown");
+    }
+
+    #[test]
+    fn extension_matching_is_case_insensitive() {
+        let root = tmpdir("scan-case");
+        fs::write(root.join("Upper.MD"), "# upper").unwrap();
+        fs::write(root.join("Script.SH"), "echo hi\n").unwrap();
+        let got = scan_folder(root.to_str().unwrap().to_string()).unwrap();
+        let names: Vec<_> = got.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"Upper.MD"), "uppercase .MD missing: {names:?}");
+        assert!(names.contains(&"Script.SH"), "uppercase .SH missing: {names:?}");
     }
 
     #[test]

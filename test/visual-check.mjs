@@ -66,9 +66,22 @@ await page.addInitScript(({ doc }) => {
         { path: '/mock/docs/guide/intro.md', name: 'intro.md', rel: 'guide/intro.md', dir: 'guide', size: 1200 },
         { path: '/mock/docs/guide/setup.md', name: 'setup.md', rel: 'guide/setup.md', dir: 'guide', size: 3400 },
         { path: '/mock/docs/README.md', name: 'README.md', rel: 'README.md', dir: '', size: 800 },
+        { path: '/mock/docs/run.sh', name: 'run.sh', rel: 'run.sh', dir: '', size: 420 },
+        { path: '/mock/docs/build.py', name: 'build.py', rel: 'build.py', dir: '', size: 260 },
       ];
     }
-    if (cmd === 'read_document') return doc;
+    if (cmd === 'read_document') {
+      if (String(args?.path ?? '').endsWith('.sh')) {
+        return '#!/usr/bin/env bash\nset -euo pipefail\n\n# Deploy the thing\nfor host in "$@"; do\n  echo "deploying to $host"\ndone\n' +
+          '# A line far longer than the reading column, so it must wrap rather than\n' +
+          '# push a horizontal scrollbar onto the whole pane:\n' +
+          'docker run --rm -v "$PWD:/work" -w /work -e AWS_REGION=ap-southeast-1 --entrypoint /bin/bash my-registry.example.com/team/deploy-tool:1.4.2 -c "make build && make test && make package"\n';
+      }
+      if (String(args?.path ?? '').endsWith('.py')) {
+        return 'import sys\n\ndef main() -> int:\n    print("hello")\n    return 0\n';
+      }
+      return doc;
+    }
     if (cmd === 'search_documents') {
       return {
         hits: [
@@ -122,15 +135,17 @@ await page.screenshot({ path: path.join(OUT, '01-welcome.png') });
 await page.click('#open-folder');
 await page.locator('.tree-item').first().waitFor({ state: 'visible', timeout: 10000 });
 const treeCount = await page.locator('.tree-item').count();
-check('file tree populated', treeCount === 3, `${treeCount} items`);
+check('file tree populated', treeCount === 5, `${treeCount} items`);
 check('tree groups by dir', (await page.locator('.tree-dir').count()) === 1);
 
 // --- tabs: opening must add a tab, never replace the current one ----------
 check('no tab strip before a document is open', (await page.locator('.tab').count()) === 0);
 
 // Open a document, then wait for the async highlighter to colour a token
-// rather than sleeping a fixed amount.
-await page.click('.tree-item >> nth=0');
+// rather than sleeping a fixed amount. Name the file explicitly: the sidebar
+// now lists non-Markdown files too, so the first row is not necessarily a
+// Markdown document.
+await page.locator('.tree-item', { hasText: 'intro.md' }).first().click();
 await page.locator('#content h1').first().waitFor({ state: 'visible', timeout: 10000 });
 await page.locator('#content span[style*="color"]').first()
   .waitFor({ state: 'attached', timeout: 15000 });
@@ -218,12 +233,13 @@ await page.screenshot({ path: path.join(OUT, '03-search.png') });
 // Clear search restores the tree.
 await page.fill('#filter', '');
 await page.waitForTimeout(500);
-check('clearing search restores tree', (await page.locator('.tree-item').count()) === 3);
+check('clearing search restores tree', (await page.locator('.tree-item').count()) === 5);
 
 // --- tabs: several documents open side by side ---------------------------
 // The strip is the point of this section: opening a second document must not
-// overwrite the first, and each tab must restore its own document.
-await page.locator('.tree-item').nth(1).click();
+// overwrite the first, and each tab must restore its own document. Both are
+// Markdown so the h1 assertions below stay meaningful.
+await page.locator('.tree-item', { hasText: 'README.md' }).first().click();
 await page.waitForTimeout(700);
 check('opening a second document adds a tab',
   (await page.locator('.tab').count()) === 2, `${await page.locator('.tab').count()} tabs`);
@@ -248,7 +264,7 @@ check('the outline follows the active tab',
     (await page.locator('#content h1, #content h2, #content h3, #content h4').count()));
 
 // Re-opening a document that is already open must reuse its tab, not add one.
-await page.locator('.tree-item').nth(1).click();
+await page.locator('.tree-item', { hasText: 'README.md' }).first().click();
 await page.waitForTimeout(500);
 check('re-opening an open document reuses its tab',
   (await page.locator('.tab').count()) === 2, `${await page.locator('.tab').count()} tabs`);
@@ -262,9 +278,12 @@ check('a search hit opens its document',
   (await page.locator('#content h1').count()) >= 1);
 
 // Closing the active tab falls back to its neighbour rather than nothing.
-await page.locator('.tab').first().click();
+// Close the Markdown tab deliberately: the neighbour that takes over should be
+// a document, and a source file has no <h1> to assert on.
+const markdownTab = page.locator('.tab', { hasText: 'README.md' }).first();
+await markdownTab.click();
 await page.waitForTimeout(400);
-await page.locator('.tab.active .tab-close').click();
+await markdownTab.locator('.tab-close').click();
 await page.waitForTimeout(500);
 check('closing a tab removes it',
   await page.evaluate(() => document.querySelectorAll('.tab').length < 2));
@@ -310,17 +329,18 @@ check('closing every tab returns to the welcome screen',
 // Clear the search box first: the sidebar is showing hits, not the file list.
 await page.fill('#filter', '');
 await page.waitForTimeout(500);
-await page.locator('.tree-item').first().click();
+await page.locator('.tree-item', { hasText: 'intro.md' }).first().click();
 await page.locator('#content h1').first().waitFor({ state: 'visible', timeout: 10000 });
 await page.waitForTimeout(400);
 check('reopening after the strip emptied works',
   (await page.locator('.tab').count()) === 1 &&
     (await page.locator('#content').isVisible()));
 
-// --- tabs: the session survives a restart --------------------------------
-// Open a second document and select the first, then reload: the same tabs must
-// come back, with the same one active.
-await page.locator('.tree-item').nth(1).click();
+// --- tabs: the strip starts empty on every launch -------------------------
+// Tabs are deliberately not persisted: a restart must give a clean slate even
+// though the workspace folder is still remembered. Reloading here is the
+// closest a browser gets to closing and reopening the app.
+await page.locator('.tree-item', { hasText: 'README.md' }).first().click();
 await page.waitForTimeout(600);
 await page.locator('.tab').first().click();
 await page.waitForTimeout(400);
@@ -328,20 +348,33 @@ const sessionBefore = await page.evaluate(() => ({
   count: document.querySelectorAll('.tab').length,
   active: document.querySelector('.tab.active .tab-name')?.textContent,
 }));
+check('two tabs were open before the restart', sessionBefore.count === 2,
+  `${sessionBefore.count} tabs`);
+
 await page.reload({ waitUntil: 'load' });
 await page.waitForTimeout(2500);
 const sessionAfter = await page.evaluate(() => ({
   count: document.querySelectorAll('.tab').length,
-  active: document.querySelector('.tab.active .tab-name')?.textContent,
-  hasContent: (document.querySelector('#content h1')?.textContent ?? '').length > 0,
+  root: localStorage.getItem('mdviewer.root'),
+  tabsKey: localStorage.getItem('mdviewer.tabs'),
+  welcomeShown: !document.querySelector('#welcome')?.hidden,
+  treeRows: document.querySelectorAll('.tree-item').length,
 }));
-check('open tabs survive a reload',
-  sessionAfter.count === sessionBefore.count, 
+check('no tabs are restored after a restart', sessionAfter.count === 0,
   `${sessionBefore.count} -> ${sessionAfter.count}`);
-check('the active tab survives a reload',
-  sessionAfter.active === sessionBefore.active,
-  `${sessionBefore.active} -> ${sessionAfter.active}`);
-check('the restored tab renders its document', sessionAfter.hasContent);
+check('the welcome screen is shown after a restart', sessionAfter.welcomeShown);
+check('the workspace folder is still remembered', !!sessionAfter.root,
+  `mdviewer.root=${sessionAfter.root}`);
+check('the remembered folder repopulates the sidebar', sessionAfter.treeRows === 5,
+  `${sessionAfter.treeRows} rows`);
+check('no tab list is left in storage', sessionAfter.tabsKey === null,
+  `mdviewer.tabs=${sessionAfter.tabsKey}`);
+
+// Reopen a document so the rest of the suite has content to work with.
+await page.locator('.tree-item').first().click();
+await page.waitForTimeout(700);
+check('a document can still be opened after the restart',
+  (await page.locator('.tab').count()) === 1 && (await page.locator('#content').isVisible()));
 
 // Dark theme (state was cleared at the start, so this always starts light).
 await page.click('#theme-btn');
@@ -373,6 +406,145 @@ const codeBlocks = await page.locator('#content .code-block').count();
 check('copy buttons on every code block',
   (await page.locator('#content [data-copy]').count()) === codeBlocks,
   `${codeBlocks} blocks`);
+
+// --- non-Markdown files: shown as highlighted source ----------------------
+// A .sh file must not be run through the Markdown parser (where `#` is a
+// heading and `*` is emphasis) but shown as a syntax-highlighted code block.
+await page.locator('.tree-item', { hasText: 'run.sh' }).first().click();
+await page.locator('#content .code-block').first().waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(600);
+
+check('a shell file opens in a tab',
+  (await page.locator('.tab.active .tab-name').textContent())?.trim() === 'run.sh');
+check('a shell file renders as a code block, not Markdown',
+  (await page.locator('#content .code-block.source-view').count()) === 1 &&
+    (await page.locator('#content h1').count()) === 0,
+  `${await page.locator('#content h1').count()} headings`);
+check('the shell file is labelled with its language',
+  (await page.locator('#content .code-lang').first().textContent())?.trim() === 'bash',
+  `${await page.locator('#content .code-lang').first().textContent()}`);
+// Highlighting is proven by Shiki's own token colours, not by the `.shiki`
+// wrapper: the whole-file path takes only the inner markup of Shiki's output
+// so it can reuse the code-block chrome, and that drops the wrapper element.
+const shellSpans = await page.locator('#content .code-block code span[style]').count();
+check('the shell file is syntax highlighted', shellSpans > 3, `${shellSpans} coloured spans`);
+check('the shell colours differ by token',
+  await page.evaluate(() => {
+    const styles = new Set(
+      [...document.querySelectorAll('#content .code-block code span[style]')]
+        .map((el) => el.getAttribute('style')));
+    return styles.size > 1;
+  }));
+check('the shebang line is preserved verbatim',
+  (await page.locator('#content .code-block code').innerText()).startsWith('#!/usr/bin/env bash'),
+  JSON.stringify((await page.locator('#content .code-block code').innerText()).slice(0, 40)));
+check('shell variables are not eaten by Markdown emphasis',
+  (await page.locator('#content .code-block code').innerText()).includes('"$@"'),
+  JSON.stringify((await page.locator('#content .code-block code').innerText()).slice(0, 120)));
+
+// The source view drops Shiki's `.shiki` wrapper, so the dual-theme rules must
+// still reach its tokens. Without that, dark mode kept the light-theme inline
+// colours and some tokens became invisible against the dark background.
+check('source tokens use the dark theme palette in dark mode',
+  await page.evaluate(() => {
+    const spans = [...document.querySelectorAll('#content .code-block.source-view code span[style]')];
+    if (!spans.length) return false;
+    // Resolve the expected colour through the browser so it is comparable with
+    // the computed value (the variable is hex, `color` is `rgb(...)`).
+    const probe = document.createElement('span');
+    document.body.appendChild(probe);
+    const resolved = (value) => {
+      probe.style.color = '';
+      probe.style.color = value;
+      return getComputedStyle(probe).color;
+    };
+    const ok = spans.every((el) => {
+      const want = getComputedStyle(el).getPropertyValue('--shiki-dark').trim();
+      if (!want) return true;
+      return getComputedStyle(el).color === resolved(want);
+    });
+    probe.remove();
+    return ok;
+  }));
+
+check('no blank trailing line is shown for a newline-terminated file',
+  await page.evaluate(() => {
+    const lines = [...document.querySelectorAll('#content .code-block.source-view code > span.line')];
+    const last = lines[lines.length - 1];
+    if (!last) return false;
+    // Either Shiki emitted no trailing line, or it is hidden.
+    return last.textContent.trim() !== '' || getComputedStyle(last).display === 'none';
+  }));
+
+// Long lines wrap instead of producing a horizontal scrollbar. The scrollbar
+// the user reported was on the reading pane, so assert there is no overflow
+// anywhere on the chain from the code block out to #scroll.
+check('a long line wraps instead of scrolling sideways',
+  await page.evaluate(() => {
+    const pre = document.querySelector('#content .code-block.source-view pre');
+    const code = pre?.querySelector('code');
+    if (!pre || !code) return false;
+    return getComputedStyle(pre).whiteSpace.startsWith('pre-wrap') &&
+      pre.scrollWidth <= pre.clientWidth + 1 &&
+      code.scrollWidth <= code.clientWidth + 1;
+  }));
+
+check('the reading pane has no horizontal overflow in the source view',
+  await page.evaluate(() => {
+    const scroll = document.getElementById('scroll');
+    return scroll.scrollWidth <= scroll.clientWidth + 1;
+  }));
+
+check('wrapped continuation lines are indented (hanging indent)',
+  await page.evaluate(() => {
+    const line = [...document.querySelectorAll('#content .code-block.source-view code > span.line')]
+      .find((el) => el.getBoundingClientRect().height > 30);
+    if (!line) return false;
+    const s = getComputedStyle(line);
+    return s.textIndent !== '0px' && parseFloat(s.textIndent) < 0;
+  }));
+
+// A blank line in the file must render as exactly one blank line. Shiki puts a
+// newline text node between line spans, which stacked with `display: block` and
+// doubled every empty line; a contentless block then collapsed to zero instead.
+// Both directions are asserted on measured heights.
+check('blank lines occupy exactly one line',
+  await page.evaluate(() => {
+    const lines = [...document.querySelectorAll('#content .code-block.source-view code > span.line')];
+    if (lines.length < 4) return false;
+    const one = parseFloat(getComputedStyle(lines[0]).lineHeight);
+    // Interior blanks count; the final one is hidden on purpose.
+    const blanks = lines.slice(0, -1).filter((el) => el.textContent.trim() === '' && el.offsetParent !== null);
+    if (!blanks.length) return false;
+    return blanks.every((el) => Math.abs(el.getBoundingClientRect().height - one) <= 1);
+  }));
+
+check('a blank line is not hidden collapse-to-zero',
+  await page.evaluate(() => {
+    const lines = [...document.querySelectorAll('#content .code-block.source-view code > span.line')];
+    const blanks = lines.slice(0, -1).filter((el) => el.textContent.trim() === '' && el.offsetParent !== null);
+    return blanks.length > 0 && blanks.every((el) => el.getBoundingClientRect().height > 1);
+  }));
+
+await page.screenshot({ path: path.join(OUT, '05-shell-source.png') });
+
+// A Python file gets its own language rather than sharing the shell one.
+await page.locator('.tree-item', { hasText: 'build.py' }).first().click();
+await page.locator('#content .code-block').first().waitFor({ state: 'visible', timeout: 10000 });
+await page.waitForTimeout(600);
+check('a python file is labelled python',
+  (await page.locator('#content .code-lang').first().textContent())?.trim() === 'python',
+  `${await page.locator('#content .code-lang').first().textContent()}`);
+check('a python file keeps its indentation',
+  (await page.locator('#content .code-block code').innerText()).includes('    print("hello")'),
+  JSON.stringify((await page.locator('#content .code-block code').innerText())));
+
+// Markdown is still parsed as prose, not as source.
+await page.locator('.tree-item', { hasText: 'README.md' }).first().click();
+await page.waitForTimeout(800);
+check('markdown is still rendered as prose',
+  (await page.locator('#content .code-block.source-view').count()) === 0 &&
+    (await page.locator('#content h1').count()) >= 1);
 
 // --- sidebar sections ----------------------------------------------------
 // Hiding the document list removes the whole pane (not just its contents) and
@@ -420,8 +592,9 @@ await page.evaluate(() => {
 });
 // Open a document that is not already in a tab. Re-opening a document that is
 // already open is deliberately a no-op, so clicking the current one would never
-// pick up the mock installed above.
-await page.locator('.tree-item').nth(2).click();
+// pick up the mock installed above. Address it by name: the sidebar now also
+// lists non-Markdown files, so a positional index is fragile.
+await page.locator('.tree-item', { hasText: 'setup.md' }).first().click();
 await page.waitForTimeout(1000);
 const headings = await page.locator('#toc a').count();
 check('long outline is loaded for the overflow check', headings >= 40, `${headings} entries`);

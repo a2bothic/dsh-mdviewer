@@ -9,7 +9,7 @@ import {
   type DocEntry, type SearchHit,
   pickFolder, readDocument, scanFolder, searchDocuments, takePendingOpen,
 } from './lib/api';
-import { extractHeadings, initHighlighter, renderMarkdown, type Heading } from './lib/render';
+import { extractHeadings, initHighlighter, renderDocument, type Heading } from './lib/render';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T =>
   document.querySelector(sel) as T;
@@ -39,8 +39,6 @@ const state = {
   active: -1,
   /** Most recently closed tabs, newest last, for reopening. */
   closed: [] as Tab[],
-  /** True while the previous session's tabs are being re-opened. */
-  restoring: false,
   headings: [] as Heading[],
   view: 'files' as 'files' | 'search',
   sideOpen: true,
@@ -90,7 +88,7 @@ $('#app').innerHTML = `
   <div id="scroll">
     <div id="welcome">
       <h1>Markdown Viewer</h1>
-      <p>Open a folder to browse and full-text search its Markdown documents.</p>
+      <p>Open a folder to browse and full-text search its documents.</p>
     </div>
     <article id="content" class="markdown" hidden></article>
     <div id="doc-meta" class="doc-meta" hidden></div>
@@ -121,7 +119,7 @@ function formatSize(bytes: number): string {
 function renderTree(docs: DocEntry[]): void {
   if (!docs.length) {
     tree.innerHTML = state.root
-      ? '<p class="muted">No Markdown documents found here.</p>'
+      ? '<p class="muted">No readable documents found here.</p>'
       : '<p class="muted">Open a folder to begin.</p>';
     return;
   }
@@ -230,9 +228,6 @@ function showActiveTab(): void {
   renderTabs();
   markActiveInTree();
   keepActiveTabVisible();
-  // Not while restoring: the session is written once, at the end, so a partly
-  // rebuilt strip is never what gets remembered.
-  if (!state.restoring) saveTabs();
 }
 
 /**
@@ -251,7 +246,9 @@ async function openDoc(path: string, revealLine?: number): Promise<void> {
 
   let html: string;
   try {
-    html = renderMarkdown(await readDocument(path));
+    // Markdown is parsed as prose; every other accepted extension is shown as
+    // highlighted source, so a shell script keeps its own syntax.
+    html = renderDocument(path, await readDocument(path));
   } catch (e) {
     // A failed read is still a tab, so the strip keeps matching reality and
     // the error is attributable to a file rather than replacing the reader.
@@ -298,7 +295,6 @@ function closeTab(index: number): void {
     if (state.active > index) state.active -= 1;
     renderTabs();
     markActiveInTree();
-    saveTabs();
   }
 }
 
@@ -338,47 +334,15 @@ function keepActiveTabVisible(): void {
 }
 
 /* --------------------------- Tab session -------------------------------- */
-// Like the theme and the sidebar, the set of open documents survives a restart:
-// reopening the viewer should return you to what you were reading. Only the
-// paths are stored — the bodies are re-read, so a tab never shows stale text.
+// Open tabs are deliberately NOT persisted. The viewer always starts with an
+// empty strip, so closing it and opening it again gives a clean slate rather
+// than re-reading a tab set you have moved on from. The workspace folder is
+// still remembered, so the sidebar is populated right away; only the documents
+// themselves are forgotten.
 
-const TABS_KEY = 'mdviewer.tabs';
-
-function saveTabs(): void {
-  try {
-    localStorage.setItem(TABS_KEY, JSON.stringify({
-      paths: state.tabs.map((t) => t.path),
-      active: state.active,
-    }));
-  } catch { /* storage full or unavailable: the session is not worth failing over */ }
-}
-
-/**
- * Restore the previous session. Each path is re-opened in order; the active
- * index is only moved once they all exist, so a tab that has since been
- * deleted cannot leave the strip pointing at the wrong document.
- */
-async function restoreTabs(folder: string): Promise<void> {
-  let saved: { paths?: string[]; active?: number };
-  try {
-    saved = JSON.parse(localStorage.getItem(TABS_KEY) ?? '{}');
-  } catch { return; }
-
-  const paths = (saved.paths ?? []).filter((p) => typeof p === 'string');
-  if (!paths.length) return;
-  state.restoring = true;
-  try {
-    for (const path of paths) {
-      try {
-        await openDoc(path);
-      } catch { /* a path that no longer exists is simply skipped */ }
-    }
-  } finally {
-    state.restoring = false;
-  }
-  const at = typeof saved.active === 'number' ? saved.active : -1;
-  if (at >= 0 && at < state.tabs.length) activate(at);
-  saveTabs();
+/** Drop any tab list left behind by an older build that did persist them. */
+function clearLegacyTabSession(): void {
+  try { localStorage.removeItem('mdviewer.tabs'); } catch { /* ignore */ }
 }
 
 /* Mousedown, not click: activating on press is what every tabbed app does,
@@ -878,19 +842,14 @@ renderTabs();
 
 void initHighlighter().catch(() => { /* highlighting is best-effort */ });
 
-// Bring back the documents that were open last time, then let an external open
-// (a file association or a drag-drop at launch) take precedence over them. The
-// saved workspace folder is what makes the restored tabs meaningful in the
-// sidebar; without it the tabs still open, just unlisted.
-//
-// Both run in one chain because they touch the same strip: restoring after an
-// external open would re-activate a stale tab, and running them concurrently
-// would interleave their inserts.
+// Remember only the workspace folder, then let an external open (a file
+// association or a drag-drop at launch) take precedence. No tabs are restored:
+// every launch starts on the welcome screen.
 async function bootSession(carryOn: () => Promise<void>): Promise<void> {
+  clearLegacyTabSession();
   try {
     const folder = localStorage.getItem('mdviewer.root');
     if (folder) await openFolder(folder);
-    await restoreTabs(folder ?? '');
   } catch (e) {
     console.error('[mdviewer] session restore failed:', e);
   }

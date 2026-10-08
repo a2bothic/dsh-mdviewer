@@ -4,9 +4,10 @@
 
 [![CI](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml/badge.svg)](https://github.com/a2bothic/dsh-mdviewer/actions/workflows/ci.yml)
 
-A lightweight desktop Markdown document viewer: browse a folder of documents
-and search their full text, rendered with the reading typography used by the
-DeepSeek Harness web GUI.
+A lightweight desktop document viewer: browse a folder of documents and search
+their full text, rendered with the reading typography used by the DeepSeek
+Harness web GUI. Markdown is read as prose; shell scripts, source files, and
+config files are read as highlighted source.
 
 Built with **Tauri v2** (Rust backend + system webview), so the installer is a
 few megabytes rather than the ~100 MB an Electron build would need.
@@ -15,13 +16,24 @@ few megabytes rather than the ~100 MB an Electron build would need.
 
 ## What it does
 
-- **Folder browsing** — open a folder; every `.md`, `.markdown`, `.mdx`, `.txt`
-  under it appears in the sidebar, grouped by directory.
+- **Folder browsing** — open a folder; every document under it appears in the
+  sidebar, grouped by directory. That means Markdown (`.md`, `.markdown`,
+  `.mdx`, …), plain text (`.txt`, `.log`, `.rst`, `.csv`), shell scripts
+  (`.sh`, `.bash`, `.zsh`, `.fish`, `.ps1`, `.bat`), source files (`.py`, `.rs`,
+  `.go`, `.ts`, …) and config or markup (`.json`, `.yaml`, `.toml`, `.html`,
+  `.css`, …).
+- **Every file type reads properly** — Markdown is parsed as prose; anything
+  else the viewer accepts is shown as a syntax-highlighted source view instead,
+  so a shell script keeps its `#!`, `#` comments and `$` variables intact
+  rather than being mangled by Markdown's heading and emphasis rules. Long
+  lines wrap to the reading column with a hanging indent instead of pushing a
+  horizontal scrollbar across the pane.
 - **Tabs** — every document you open gets its own tab instead of replacing the
   one you were reading, so you can keep several open and switch between them.
   The tab remembers its scroll position and outline; `Ctrl+W` closes one,
   `Ctrl+Tab` cycles, `Ctrl+Shift+T` reopens the last closed, and a middle-click
-  closes a tab. A long strip scrolls sideways.
+  closes a tab. A long strip scrolls sideways. Tabs last for the session only:
+  closing the app and opening it again starts with an empty strip.
 - **Full-text search** — one box searches the whole folder. Results show the
   file, line number, and the matching line with the hit highlighted.
 - **Reading typography** — the column, rhythm, and font stack are ported from
@@ -38,12 +50,15 @@ few megabytes rather than the ~100 MB an Electron build would need.
 - **Code highlighting, math, tables, task lists** — GitHub-flavoured Markdown
   through marked, Shiki (dual light/dark themes), and KaTeX.
 - **Reading controls** — column width, text size, and light/dark theme.
-- **Opens files from outside** — set it as the default handler for `.md`, or
-  drop a file onto the window. The document's folder becomes the workspace, so
-  the sidebar and search cover its neighbours.
+- **Opens files from outside** — set it as the default handler for `.md`, `.sh`,
+  or most source and config types, or drop a file onto the window. The
+  document's folder becomes the workspace, so the sidebar and search cover its
+  neighbours.
 
-Preferences (theme, sidebar state, splitter position, and the open tabs with the
-active one) persist in `localStorage`.
+Preferences (theme, sidebar state, splitter position, and the workspace folder)
+persist in `localStorage`. Open tabs deliberately do **not**: the viewer starts
+with an empty strip every launch, so a new session is never cluttered with what
+you happened to be reading last time.
 
 Deliberately **not** included: editing, note graphs, sync, plugins, an agent,
 or a terminal. This is a viewer.
@@ -110,6 +125,12 @@ pnpm install
 pnpm dev:desktop     # launches the Tauri window with hot reload
 ```
 
+> **Contributors: every change ends with a local reinstall.** The browser suites
+> run against the built bundle with a *mocked* Tauri bridge, so they cannot
+> catch a break in the real IPC surface, plugin wiring, or window creation.
+> Rebuilding and reinstalling is the only step that proves the shipped app still
+> works — see [CONTRIBUTING.md](CONTRIBUTING.md) for the finish checklist.
+
 ## Building
 
 ```bash
@@ -125,30 +146,9 @@ Artifacts land in `src-tauri/target/release/bundle/`:
 
 To build a **Windows** binary you must run the build on Windows; cross-compiling
 a Tauri app from WSL needs the MSVC toolchain and is not supported out of the box.
-
-### Windows build notes
-
-Two things bite on a fresh Windows machine, neither of which is a code problem:
-
-1. **`cargo` must be on `PATH`.** Tauri shells out to `cargo metadata`, and the
-   rustup installer does not always add `%USERPROFILE%\.cargo\bin` to the
-   environment of every shell. If the build fails with
-
-   ```
-   failed to run 'cargo metadata' ... program not found
-   ```
-
-   prepend the directory for that session:
-
-   ```powershell
-   $env:PATH = "$env:USERPROFILE\.cargo\bin;$env:PATH"
-   pnpm build:desktop
-   ```
-
-2. **`bundle.targets` must be `"all"`, not an explicit cross-platform list.**
-   Naming `dmg`, `deb`, or `appimage` while building on Windows makes Tauri
-   abort the whole bundle step. `"all"` builds whichever formats are valid for
-   the host platform, which is what you want on every OS.
+The Windows gotchas that bite on a fresh machine — `cargo` not on `PATH`, a stale
+crates.io mirror, `pnpm` refusing build scripts — are collected in
+[CONTRIBUTING.md](CONTRIBUTING.md#windows-notes).
 
 ## Typography
 
@@ -185,7 +185,7 @@ width; the derived rhythm recalculates automatically.
 src/
   main.ts              application shell, tab strip, sidebar, toolbar, search UI
   lib/api.ts           typed wrappers over the Rust commands
-  lib/render.ts        Markdown pipeline (marked + Shiki + KaTeX + DOMPurify)
+  lib/render.ts        render pipelines (marked + Shiki + KaTeX + DOMPurify)
   styles/tokens.css    design tokens (fonts, colours, rhythm)
   styles/typography.css  the reading-column rules
   styles/app.css       shell layout
@@ -196,9 +196,25 @@ src-tauri/
 Tabs hold a rendered snapshot of their document rather than re-reading the file,
 so switching is instant and each tab keeps its own scroll position and outline.
 Opening a path that is already open activates its tab instead of adding a copy.
+The strip is not written to storage, so every launch begins empty.
 
 All filesystem access lives in Rust, so the webview never touches the disk
 directly and the CSP can stay strict. There is no IPC surface for writing.
+
+### Which pipeline a file gets
+
+`render.ts` exposes one entry point, `renderDocument(path, text)`, which picks
+the pipeline from the extension:
+
+- **Markdown** (`.md`, `.markdown`, `.mdx`, …) goes through the full pipeline
+  below.
+- **Everything else** the backend accepts is highlighted as source: the whole
+  file becomes one Shiki code block, labelled with its language. The extension
+  is mapped to a Shiki language id (`EXTENSION_LANGUAGES`), and an unknown
+  extension falls back to uncoloured plain text rather than failing.
+
+The backend decides what is scannable (`DOC_EXTENSIONS` in `src-tauri/src/lib.rs`);
+the front end decides how each accepted file is displayed.
 
 ### Rendering order
 
@@ -215,14 +231,16 @@ Order matters in `render.ts`:
 
 ```bash
 bash scripts/check.sh                     # typecheck + build + Rust tests + browser checks
-node test/visual-check.mjs                # 47 checks in a real Chromium against the built bundle
+node test/visual-check.mjs                # 93 checks in a real Chromium against the built bundle
 python3 src-tauri/test-search-window.py   # search highlight offset correctness
 ```
 
 The visual check drives the actual production bundle with a mocked Tauri bridge
 and asserts both the DOM and the computed typography (line height, gaps, list
-indent, column width), so a CSS regression fails the suite. Screenshots are
-written to `test-output/`.
+indent, column width), so a CSS regression fails the suite. It also covers the
+two behaviours that are easy to regress: that a restart comes back to an empty
+tab strip, and that a non-Markdown file is highlighted as source rather than
+parsed as Markdown. Screenshots are written to `test-output/`.
 
 The Rust unit tests cover the search logic: scan filtering, skipped directories,
 relative paths, line numbers, **highlight offsets** (including CJK and truncated
